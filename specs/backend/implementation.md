@@ -17,10 +17,16 @@
 
 ## Milestone 2 — Authentication
 
-- User registration and login endpoints
-- Password hashing (bcrypt)
-- JWT issuance and validation middleware
-- Protected route pattern applied to all subsequent endpoints
+- `POST /auth/register` — email + password, bcrypt (cost 12), 409 on duplicate
+- `POST /auth/login` — returns a 15-minute access JWT and a 30-day refresh token
+- `POST /auth/refresh` — rotates the refresh token; replaying a revoked token
+  revokes every token for that user
+- `POST /auth/logout` — revokes one refresh token; idempotent
+- `GET /me` — returns the caller's ID; first consumer of the protected pattern
+- `RequireAuth` middleware applied via the `authed` route group, with `userID(c)`
+  for handlers. Milestones 4–7 hang their routes off this group.
+- `JWT_SECRET` is required at startup, minimum 32 bytes, no default
+- Design: `docs/superpowers/specs/2026-08-02-auth-design.md`
 
 ## Milestone 3 — Book Search & Metadata
 
