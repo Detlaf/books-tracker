@@ -109,9 +109,10 @@ So `refresh_tokens.revoked_reason` records why:
 Empty is deliberately non-cascading: pre-migration rows carry no reason, and reading absence of
 evidence as evidence of theft would log those users out everywhere.
 
-This still bounds token theft to a single-use window: a stolen token is either used before the
-victim's next refresh, in which case the victim's next attempt loses the race and burns the
-family, or used after, in which case it is already `rotated` and burns the family immediately.
+This bounds token theft to a single-use window in the common case: a stolen token is either used
+before the victim's next refresh, in which case the victim's next attempt loses the race and burns
+the family, or used after, in which case it is already `rotated` and burns the family immediately.
+One interleaving escapes that bound — see "a race winner's new token can outlive the cascade" below.
 
 ### Known limitations
 
@@ -125,6 +126,14 @@ family, or used after, in which case it is already `rotated` and burns the famil
 - **Expired `refresh_tokens` rows are never cleaned up.** Acceptable at this scale — one row per
   login per device, and lookups are index-bound on `token_hash`. Revisit if a sessions UI is
   added, which would make the dead rows user-visible.
+- **A race winner's new token can outlive the cascade.** `Refresh` revokes and then issues in two
+  separate statements. If the loser's `RevokeAllForUser` runs between the winner's `UPDATE` and its
+  `CreateRefreshToken`, the winner's fresh token is inserted after the sweep and stays live. Where
+  the winner is a thief, that leaves the attacker with a session while the victim is locked out —
+  the inverse of the intended outcome. The window is the few hundred microseconds between the two
+  statements and requires an attacker already holding a stolen token and racing deliberately.
+  Closing it means running the revoke and the insert in one transaction, which is the natural
+  follow-up; it was left out here because it widens the `Store` contract to expose transactions.
 
 ## Schema — migration 000003
 
