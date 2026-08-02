@@ -65,14 +65,16 @@ func (s *SQLite) CreateRefreshToken(ctx context.Context, userID int64, tokenHash
 // expired rows here would collapse "unknown" and "revoked" into one result and
 // break reuse detection; the service inspects the state fields instead.
 func (s *SQLite) RefreshTokenByHash(ctx context.Context, tokenHash string) (auth.RefreshToken, error) {
-	const q = `SELECT user_id, token_hash, expires_at, revoked_at FROM refresh_tokens WHERE token_hash = ?`
+	const q = `SELECT user_id, token_hash, expires_at, revoked_at, revoked_reason
+	           FROM refresh_tokens WHERE token_hash = ?`
 
 	var (
-		rt        auth.RefreshToken
-		revokedAt sql.NullTime
+		rt            auth.RefreshToken
+		revokedAt     sql.NullTime
+		revokedReason sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, q, tokenHash).
-		Scan(&rt.UserID, &rt.TokenHash, &rt.ExpiresAt, &revokedAt)
+		Scan(&rt.UserID, &rt.TokenHash, &rt.ExpiresAt, &revokedAt, &revokedReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return auth.RefreshToken{}, auth.ErrNotFound
 	}
@@ -83,18 +85,28 @@ func (s *SQLite) RefreshTokenByHash(ctx context.Context, tokenHash string) (auth
 		t := revokedAt.Time
 		rt.RevokedAt = &t
 	}
+	// NULL, on rows written before the reason was recorded, becomes "".
+	rt.RevokedReason = revokedReason.String
 	return rt, nil
 }
 
-// RevokeRefreshToken is a no-op when no row matches, which is what makes
-// logout idempotent.
-func (s *SQLite) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
-	const q = `UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`
+// RevokeRefreshToken revokes a live row and reports whether this call is the
+// one that did it. The WHERE clause makes that decision atomic, so concurrent
+// callers cannot both believe they revoked the same token. No matching live row
+// is (false, nil) rather than an error, which is what makes logout idempotent.
+func (s *SQLite) RevokeRefreshToken(ctx context.Context, tokenHash, reason string) (bool, error) {
+	const q = `UPDATE refresh_tokens SET revoked_at = ?, revoked_reason = ?
+	           WHERE token_hash = ? AND revoked_at IS NULL`
 
-	if _, err := s.db.ExecContext(ctx, q, time.Now().UTC(), tokenHash); err != nil {
-		return fmt.Errorf("revoke refresh token: %w", err)
+	res, err := s.db.ExecContext(ctx, q, time.Now().UTC(), reason, tokenHash)
+	if err != nil {
+		return false, fmt.Errorf("revoke refresh token: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("revoke refresh token: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (s *SQLite) RevokeAllForUser(ctx context.Context, userID int64) error {

@@ -16,6 +16,9 @@ type fakeStore struct {
 	tokens  map[string]RefreshToken
 	nextID  int64
 	failNow error
+	// beforeRevoke runs at the top of RevokeRefreshToken, before the lock, so a
+	// test can interleave another caller between a Refresh's read and its write.
+	beforeRevoke func()
 }
 
 func newFakeStore() *fakeStore {
@@ -68,19 +71,24 @@ func (f *fakeStore) RefreshTokenByHash(_ context.Context, tokenHash string) (Ref
 	return rt, nil
 }
 
-func (f *fakeStore) RevokeRefreshToken(_ context.Context, tokenHash string) error {
+func (f *fakeStore) RevokeRefreshToken(_ context.Context, tokenHash, reason string) (bool, error) {
+	if hook := f.beforeRevoke; hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rt, ok := f.tokens[tokenHash]
 	if !ok {
-		return nil // idempotent, matching the Store contract
+		return false, nil // unknown hash: not an error, matching the Store contract
 	}
-	if rt.RevokedAt == nil {
-		now := time.Now()
-		rt.RevokedAt = &now
-		f.tokens[tokenHash] = rt
+	if rt.RevokedAt != nil {
+		return false, nil // someone else revoked it first
 	}
-	return nil
+	now := time.Now()
+	rt.RevokedAt = &now
+	rt.RevokedReason = reason
+	f.tokens[tokenHash] = rt
+	return true, nil
 }
 
 func (f *fakeStore) RevokeAllForUser(_ context.Context, userID int64) error {
@@ -276,6 +284,94 @@ func TestRefreshReuseRevokesFamily(t *testing.T) {
 	}
 	if _, err := svc.Refresh(ctx, second.RefreshToken); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("the revoked family member must not refresh, got err = %v", err)
+	}
+}
+
+// Two requests presenting the same live token both read it as un-revoked. Only
+// one can win the revoke; the loser must be treated as a replay rather than
+// handed a second valid pair, which is the whole point of rotation.
+func TestRefreshLosingTheRotationRaceRevokesFamily(t *testing.T) {
+	svc, store := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.Login(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The competing refresh runs between our read and our write.
+	var (
+		raced  bool
+		winner TokenPair
+	)
+	store.beforeRevoke = func() {
+		if raced {
+			return
+		}
+		raced = true
+		won, err := svc.Refresh(ctx, first.RefreshToken)
+		if err != nil {
+			t.Errorf("the racing refresh should have won: %v", err)
+		}
+		winner = won
+	}
+
+	if _, err := svc.Refresh(ctx, first.RefreshToken); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("the losing refresh returned err = %v, want ErrInvalidToken", err)
+	}
+	if !raced {
+		t.Fatal("the race hook never ran")
+	}
+
+	// Losing the race means the token was used twice: revoke the family.
+	live, err := store.RefreshTokenByHash(ctx, HashRefreshToken(winner.RefreshToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.RevokedAt == nil {
+		t.Fatal("a token used twice must revoke every token for the user")
+	}
+}
+
+// A logged-out token is revoked, but replaying it is not evidence of theft: a
+// client retrying a logout, or replaying one stale token in a loop, must not be
+// able to sign the user out of every other device.
+func TestRefreshAfterLogoutDoesNotRevokeFamily(t *testing.T) {
+	svc, store := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	phone, err := svc.Login(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	laptop, err := svc.Login(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Logout(ctx, phone.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Refresh(ctx, phone.RefreshToken); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err = %v, want ErrInvalidToken", err)
+	}
+
+	// The other device must still be signed in.
+	live, err := store.RefreshTokenByHash(ctx, HashRefreshToken(laptop.RefreshToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.RevokedAt != nil {
+		t.Fatal("replaying a logged-out token must not revoke the rest of the family")
+	}
+	if _, err := svc.Refresh(ctx, laptop.RefreshToken); err != nil {
+		t.Fatalf("the other device must still refresh, got err = %v", err)
 	}
 }
 

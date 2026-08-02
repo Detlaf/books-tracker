@@ -91,8 +91,16 @@ func TestRefreshTokenLifecycle(t *testing.T) {
 		t.Fatalf("ExpiresAt = %v, want %v", got.ExpiresAt, expiresAt)
 	}
 
-	if err := s.RevokeRefreshToken(ctx, "hash1"); err != nil {
+	if got.RevokedReason != "" {
+		t.Fatalf("RevokedReason = %q, want empty on a live token", got.RevokedReason)
+	}
+
+	revoked, err := s.RevokeRefreshToken(ctx, "hash1", auth.RevokeReasonRotated)
+	if err != nil {
 		t.Fatalf("RevokeRefreshToken: %v", err)
+	}
+	if !revoked {
+		t.Fatal("revoking a live token must report revoked = true")
 	}
 
 	// The revoked row must still come back — reuse detection depends on it.
@@ -103,12 +111,54 @@ func TestRefreshTokenLifecycle(t *testing.T) {
 	if got.RevokedAt == nil {
 		t.Fatal("RevokedAt must be set after revocation")
 	}
+	if got.RevokedReason != auth.RevokeReasonRotated {
+		t.Fatalf("RevokedReason = %q, want %q", got.RevokedReason, auth.RevokeReasonRotated)
+	}
+}
+
+// Only the first revoke wins. That bool is what stops two concurrent refreshes
+// of the same token from both being served.
+func TestRevokeRefreshTokenIsWonOnlyOnce(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	user, err := s.CreateUser(ctx, "a@b.com", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRefreshToken(ctx, user.ID, "hash1", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	if revoked, err := s.RevokeRefreshToken(ctx, "hash1", auth.RevokeReasonRotated); err != nil || !revoked {
+		t.Fatalf("first revoke: revoked = %v, err = %v; want true, nil", revoked, err)
+	}
+	revoked, err := s.RevokeRefreshToken(ctx, "hash1", auth.RevokeReasonLogout)
+	if err != nil {
+		t.Fatalf("second revoke must not error, got: %v", err)
+	}
+	if revoked {
+		t.Fatal("the second revoke must report revoked = false")
+	}
+
+	// The losing revoke must not overwrite why the token was first revoked.
+	got, err := s.RefreshTokenByHash(ctx, "hash1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RevokedReason != auth.RevokeReasonRotated {
+		t.Fatalf("RevokedReason = %q, want it unchanged at %q", got.RevokedReason, auth.RevokeReasonRotated)
+	}
 }
 
 func TestRevokeRefreshTokenUnknownIsNoOp(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.RevokeRefreshToken(context.Background(), "nosuchhash"); err != nil {
+	revoked, err := s.RevokeRefreshToken(context.Background(), "nosuchhash", auth.RevokeReasonLogout)
+	if err != nil {
 		t.Fatalf("revoking an unknown token must succeed, got: %v", err)
+	}
+	if revoked {
+		t.Fatal("an unknown hash must report revoked = false")
 	}
 }
 

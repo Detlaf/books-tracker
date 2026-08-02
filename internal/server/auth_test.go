@@ -173,6 +173,38 @@ func TestRefreshWithGarbageReturns401(t *testing.T) {
 	}
 }
 
+// The branch's headline security property, driven through the real stack:
+// once a refresh token has been rotated it is spent, and presenting it again
+// is refused rather than served.
+func TestRefreshRejectsPreRotationToken(t *testing.T) {
+	srv := newTestServer(t)
+	pair := registerAndLogin(t, srv)
+
+	rec := doJSON(t, srv, http.MethodPost, "/auth/refresh",
+		map[string]string{"refresh_token": pair.RefreshToken})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh: status = %d, want 200; body %s", rec.Code, rec.Body)
+	}
+	var rotated tokenPairResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &rotated); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = doJSON(t, srv, http.MethodPost, "/auth/refresh",
+		map[string]string{"refresh_token": pair.RefreshToken})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("the pre-rotation token refreshed: status = %d, want 401; body %s", rec.Code, rec.Body)
+	}
+
+	// Replaying a rotated token is theft, so the token it was rotated into
+	// must be dead too.
+	rec = doJSON(t, srv, http.MethodPost, "/auth/refresh",
+		map[string]string{"refresh_token": rotated.RefreshToken})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("reuse detection did not revoke the family: status = %d, want 401", rec.Code)
+	}
+}
+
 func TestLogoutIsIdempotent(t *testing.T) {
 	srv := newTestServer(t)
 	pair := registerAndLogin(t, srv)
