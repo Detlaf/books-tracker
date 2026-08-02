@@ -2,32 +2,27 @@ package main
 
 import (
 	"log"
-	"os"
 
+	"github.com/kate/book-tracking/internal/config"
 	"github.com/kate/book-tracking/internal/db"
 	"github.com/kate/book-tracking/internal/server"
 )
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "book_tracking.db"
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("configuration error: %v", err)
 	}
 
-	database, err := db.Open(dsn)
+	database, err := db.Open(cfg.DSN)
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
 	defer database.Close()
 
-	addr := os.Getenv("ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
-
-	srv := server.New(database)
-	log.Printf("listening on %s", addr)
-	if err := srv.Run(addr); err != nil {
+	srv := server.New(database, cfg)
+	log.Printf("listening on %s", cfg.Addr)
+	if err := srv.Run(cfg.Addr); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
