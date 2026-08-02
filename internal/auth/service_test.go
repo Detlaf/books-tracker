@@ -47,6 +47,9 @@ func (f *fakeStore) CreateUser(_ context.Context, email, passwordHash string) (U
 func (f *fakeStore) UserByEmail(_ context.Context, email string) (User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failNow != nil {
+		return User{}, f.failNow
+	}
 	u, ok := f.users[email]
 	if !ok {
 		return User{}, ErrNotFound
@@ -333,6 +336,27 @@ func TestRefreshLosingTheRotationRaceRevokesFamily(t *testing.T) {
 	}
 	if live.RevokedAt == nil {
 		t.Fatal("a token used twice must revoke every token for the user")
+	}
+}
+
+// A store failure that is not ErrNotFound must surface, not be flattened into
+// ErrInvalidCredentials: a database outage is not a wrong password.
+func TestLoginPropagatesStoreError(t *testing.T) {
+	svc, store := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("database is down")
+	store.failNow = boom
+
+	_, err := svc.Login(ctx, "a@b.com", "password123")
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the store error", err)
+	}
+	if errors.Is(err, ErrInvalidCredentials) {
+		t.Fatal("a store outage must not present as invalid credentials")
 	}
 }
 

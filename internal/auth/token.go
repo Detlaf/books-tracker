@@ -52,6 +52,9 @@ func (s *Signer) ParseAccess(token string) (int64, error) {
 		// Without this, a token re-signed with "alg": "none" would parse.
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithTimeFunc(func() time.Time { return s.now() }),
+		// jwt/v5 only validates exp when it is present, so a correctly signed
+		// token minted without one would never expire.
+		jwt.WithExpirationRequired(),
 	)
 	if err != nil {
 		return 0, ErrInvalidToken

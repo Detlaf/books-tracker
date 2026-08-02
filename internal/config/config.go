@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -23,7 +24,10 @@ type Config struct {
 // than falling back to a generated key when JWT_SECRET is missing: a default
 // signing key is how a test secret reaches production.
 func Load() (Config, error) {
-	secret := os.Getenv("JWT_SECRET")
+	// Trimmed before the length check: `docker secret` and
+	// `kubectl create secret --from-file` both append a newline, and signing
+	// with it would give each environment a silently different key.
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if len(secret) < MinSecretLen {
 		return Config{}, fmt.Errorf(
 			"JWT_SECRET must be set and at least %d bytes; generate one with: openssl rand -base64 32",

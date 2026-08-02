@@ -26,6 +26,29 @@ func TestLoadRejectsShortSecret(t *testing.T) {
 	}
 }
 
+// `docker secret` and `kubectl create secret --from-file` both leave a trailing
+// newline. Signing with it would silently produce a different key per
+// environment, so the padding is stripped before the length check.
+func TestLoadTrimsSecret(t *testing.T) {
+	t.Setenv("JWT_SECRET", "  \n\t"+validSecret+"\n")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if string(cfg.JWTSecret) != validSecret {
+		t.Errorf("JWTSecret = %q, want it trimmed to %q", cfg.JWTSecret, validSecret)
+	}
+}
+
+// Whitespace must not be counted towards the minimum length.
+func TestLoadRejectsWhitespacePaddedShortSecret(t *testing.T) {
+	t.Setenv("JWT_SECRET", strings.Repeat(" ", 40)+"short")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected an error: the secret is only 5 bytes once trimmed")
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("JWT_SECRET", validSecret)
 	t.Setenv("DATABASE_URL", "")

@@ -19,6 +19,9 @@ type SQLite struct {
 
 func New(db *sql.DB) *SQLite { return &SQLite{db: db} }
 
+// CreateUser returns the row it inserted with CreatedAt left at its zero value:
+// the timestamp is a database default and is not read back. UserByEmail
+// populates it.
 func (s *SQLite) CreateUser(ctx context.Context, email, passwordHash string) (auth.User, error) {
 	const q = `INSERT INTO users (email, password_hash) VALUES (?, ?)`
 

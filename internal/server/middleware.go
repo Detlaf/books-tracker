@@ -35,7 +35,15 @@ func RequireAuth(signer *auth.Signer) gin.HandlerFunc {
 // userID returns the authenticated caller's ID. It is only valid inside a
 // handler behind RequireAuth, which is the single place the value is set —
 // handlers use this instead of repeating an unchecked type assertion.
+//
+// It returns 0 rather than panicking when the value is absent: a route wired up
+// without RequireAuth is a bug, but it should surface as a failed lookup in the
+// handler, not as a 500 from a panic in the middleware layer.
 func userID(c *gin.Context) int64 {
-	id, _ := c.MustGet(userIDKey).(int64)
+	v, ok := c.Get(userIDKey)
+	if !ok {
+		return 0
+	}
+	id, _ := v.(int64)
 	return id
 }
