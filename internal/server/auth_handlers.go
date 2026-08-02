@@ -109,3 +109,9 @@ func (s *Server) handleLogout(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+// handleMe returns the caller's identity. It is the first consumer of the
+// protected-route pattern and doubles as a client-side token check.
+func (s *Server) handleMe(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"user_id": userID(c)})
+}

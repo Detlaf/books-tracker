@@ -40,6 +40,10 @@ func (s *Server) routes() {
 	authGroup.POST("/login", s.handleLogin)
 	authGroup.POST("/refresh", s.handleRefresh)
 	authGroup.POST("/logout", s.handleLogout)
+
+	// Milestones 4-7 hang their routes off this group.
+	authed := s.router.Group("/", RequireAuth(s.signer))
+	authed.GET("/me", s.handleMe)
 }
 
 // Handler exposes the router for tests and for embedding behind another mux.
