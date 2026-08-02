@@ -1606,7 +1606,7 @@ git commit -m "Add refresh rotation with reuse detection and logout"
 **Files:**
 - Modify: `internal/server/server.go`
 - Create: `internal/server/auth_handlers.go`
-- Create: `internal/server/testing.go`
+- Create: `internal/server/helpers_test.go`
 - Test: `internal/server/auth_test.go`
 
 **Interfaces:**
@@ -1830,7 +1830,9 @@ func TestMalformedJSONReturns400(t *testing.T) {
 
 - [ ] **Step 2: Write the test server helper**
 
-Create `internal/server/testing.go`:
+Create `internal/server/helpers_test.go`. It must be a `_test.go` file: a regular
+build file importing `testing` would compile test scaffolding into the server binary
+and register testing's flags at init.
 
 ```go
 package server
