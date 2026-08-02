@@ -69,3 +69,39 @@ func (s *Service) issuePair(ctx context.Context, userID int64) (TokenPair, error
 		RefreshToken: refresh,
 	}, nil
 }
+
+// Refresh rotates a refresh token: the presented token is revoked and a fresh
+// pair issued. Presenting an already-revoked token means it was replayed, so
+// every token for that user is revoked and the client must log in again.
+func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
+	hash := HashRefreshToken(refreshToken)
+
+	stored, err := s.store.RefreshTokenByHash(ctx, hash)
+	if errors.Is(err, ErrNotFound) {
+		return TokenPair{}, ErrInvalidToken
+	}
+	if err != nil {
+		return TokenPair{}, err
+	}
+
+	if stored.RevokedAt != nil {
+		if err := s.store.RevokeAllForUser(ctx, stored.UserID); err != nil {
+			return TokenPair{}, err
+		}
+		return TokenPair{}, ErrInvalidToken
+	}
+	if !s.now().Before(stored.ExpiresAt) {
+		return TokenPair{}, ErrInvalidToken
+	}
+	if err := s.store.RevokeRefreshToken(ctx, hash); err != nil {
+		return TokenPair{}, err
+	}
+	return s.issuePair(ctx, stored.UserID)
+}
+
+// Logout revokes one refresh token, leaving other devices signed in. It
+// succeeds whether or not the token exists: a client that has lost track of
+// its session should still be able to log out cleanly.
+func (s *Service) Logout(ctx context.Context, refreshToken string) error {
+	return s.store.RevokeRefreshToken(ctx, HashRefreshToken(refreshToken))
+}

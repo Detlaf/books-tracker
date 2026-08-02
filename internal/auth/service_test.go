@@ -185,3 +185,123 @@ func TestLoginUnknownEmailSameError(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
 	}
 }
+
+func TestRefreshRotatesToken(t *testing.T) {
+	svc, store := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.Login(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := svc.Refresh(ctx, first.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if second.RefreshToken == first.RefreshToken {
+		t.Fatal("refresh must issue a new refresh token")
+	}
+
+	old, err := store.RefreshTokenByHash(ctx, HashRefreshToken(first.RefreshToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.RevokedAt == nil {
+		t.Fatal("the presented refresh token must be revoked after rotation")
+	}
+}
+
+func TestRefreshRejectsUnknownToken(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, err := svc.Refresh(context.Background(), "not-a-real-token"); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err = %v, want ErrInvalidToken", err)
+	}
+}
+
+func TestRefreshRejectsExpiredToken(t *testing.T) {
+	store := newFakeStore()
+	svc := NewService(store, NewSigner(testSecret, 15*time.Minute), 30*24*time.Hour)
+	ctx := context.Background()
+
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	pair, err := svc.Login(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Move the service's clock past the refresh token's 30-day expiry.
+	svc.now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
+
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err = %v, want ErrInvalidToken", err)
+	}
+}
+
+// Replaying an already-rotated token means it was stolen: every token for that
+// user must be revoked, not just the replayed one.
+func TestRefreshReuseRevokesFamily(t *testing.T) {
+	svc, store := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.Login(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Refresh(ctx, first.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Replay the token that rotation already revoked.
+	if _, err := svc.Refresh(ctx, first.RefreshToken); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err = %v, want ErrInvalidToken", err)
+	}
+
+	// The still-live token from the legitimate client must now be dead too.
+	live, err := store.RefreshTokenByHash(ctx, HashRefreshToken(second.RefreshToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.RevokedAt == nil {
+		t.Fatal("reuse detection must revoke every token for the user")
+	}
+	if _, err := svc.Refresh(ctx, second.RefreshToken); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("the revoked family member must not refresh, got err = %v", err)
+	}
+}
+
+func TestLogoutRevokesToken(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	pair, err := svc.Login(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Logout(ctx, pair.RefreshToken); err != nil {
+		t.Fatalf("Logout: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("a logged-out token must not refresh, got err = %v", err)
+	}
+}
+
+func TestLogoutUnknownTokenSucceeds(t *testing.T) {
+	svc, _ := newTestService(t)
+	if err := svc.Logout(context.Background(), "not-a-real-token"); err != nil {
+		t.Fatalf("logout must be idempotent, got: %v", err)
+	}
+}
