@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS collection_books;
+DROP TABLE IF EXISTS collections;
+DROP TABLE IF EXISTS ratings;
+DROP TABLE IF EXISTS user_books;
+DROP TABLE IF EXISTS books;
+DROP TABLE IF EXISTS users;
