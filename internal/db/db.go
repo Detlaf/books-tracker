@@ -44,15 +44,7 @@ func withConnParams(dsn string) string {
 }
 
 func runMigrations(db *sql.DB) error {
-	src, err := iofs.New(migrationsFS, "migrations")
-	if err != nil {
-		return err
-	}
-	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
-	if err != nil {
-		return err
-	}
-	m, err := migrate.NewWithInstance("iofs", src, "sqlite3", driver)
+	m, err := migrator(db)
 	if err != nil {
 		return err
 	}
@@ -60,4 +52,19 @@ func runMigrations(db *sql.DB) error {
 		return err
 	}
 	return nil
+}
+
+// migrator builds a migrate instance over the embedded migrations. It exists
+// separately from runMigrations so tests can step to an intermediate version;
+// production code always goes straight to head.
+func migrator(db *sql.DB) (*migrate.Migrate, error) {
+	src, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return nil, err
+	}
+	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
+	if err != nil {
+		return nil, err
+	}
+	return migrate.NewWithInstance("iofs", src, "sqlite3", driver)
 }

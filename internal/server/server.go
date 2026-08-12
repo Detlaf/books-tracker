@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kate/book-tracking/internal/auth"
+	"github.com/kate/book-tracking/internal/books"
 	"github.com/kate/book-tracking/internal/config"
 	"github.com/kate/book-tracking/internal/store"
 )
@@ -15,15 +16,18 @@ type Server struct {
 	db     *sql.DB
 	router *gin.Engine
 	auth   *auth.Service
+	books  *books.Service
 	signer *auth.Signer
 }
 
 func New(db *sql.DB, cfg config.Config) *Server {
 	signer := auth.NewSigner(cfg.JWTSecret, cfg.AccessTTL)
+	sqlStore := store.New(db)
 	s := &Server{
 		db:     db,
 		router: gin.Default(),
-		auth:   auth.NewService(store.New(db), signer, cfg.RefreshTTL),
+		auth:   auth.NewService(sqlStore, signer, cfg.RefreshTTL),
+		books:  books.NewService(books.NewGoogleBooks(cfg.GoogleBooksAPIKey), sqlStore),
 		signer: signer,
 	}
 	s.routes()
@@ -41,9 +45,12 @@ func (s *Server) routes() {
 	authGroup.POST("/refresh", s.handleRefresh)
 	authGroup.POST("/logout", s.handleLogout)
 
-	// Milestones 4-7 hang their routes off this group.
+	// Milestones 5-7 hang their routes off this group.
 	authed := s.router.Group("/", RequireAuth(s.signer))
 	authed.GET("/me", s.handleMe)
+	// Behind auth because every call spends API quota and writes book rows.
+	authed.GET("/books/search", s.handleBookSearch)
+	authed.GET("/books/isbn/:isbn", s.handleBookByISBN)
 }
 
 // Handler exposes the router for tests and for embedding behind another mux.

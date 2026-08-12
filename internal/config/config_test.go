@@ -88,3 +88,32 @@ func TestLoadOverrides(t *testing.T) {
 		t.Errorf("JWTSecret not carried through")
 	}
 }
+
+// The Google Books key is deliberately optional, unlike JWT_SECRET: a missing
+// key degrades quota, it does not open a security hole, and requiring one would
+// block any test run or contributor without credentials.
+func TestLoadGoogleBooksKeyIsOptional(t *testing.T) {
+	t.Setenv("JWT_SECRET", validSecret)
+	t.Setenv("GOOGLE_BOOKS_API_KEY", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load must succeed without a Google Books key: %v", err)
+	}
+	if cfg.GoogleBooksAPIKey != "" {
+		t.Fatalf("GoogleBooksAPIKey = %q, want empty", cfg.GoogleBooksAPIKey)
+	}
+}
+
+func TestLoadReadsGoogleBooksKey(t *testing.T) {
+	t.Setenv("JWT_SECRET", validSecret)
+	t.Setenv("GOOGLE_BOOKS_API_KEY", "  secret-key\n")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.GoogleBooksAPIKey != "secret-key" {
+		t.Fatalf("GoogleBooksAPIKey = %q, want it trimmed", cfg.GoogleBooksAPIKey)
+	}
+}

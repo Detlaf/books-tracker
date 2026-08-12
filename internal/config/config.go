@@ -13,11 +13,12 @@ import (
 const MinSecretLen = 32
 
 type Config struct {
-	DSN        string
-	Addr       string
-	JWTSecret  []byte
-	AccessTTL  time.Duration
-	RefreshTTL time.Duration
+	DSN               string
+	Addr              string
+	JWTSecret         []byte
+	AccessTTL         time.Duration
+	RefreshTTL        time.Duration
+	GoogleBooksAPIKey string
 }
 
 // Load reads configuration from the environment. It returns an error rather
@@ -39,6 +40,9 @@ func Load() (Config, error) {
 		JWTSecret:  []byte(secret),
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 30 * 24 * time.Hour,
+		// Optional: absent means the client calls Google keyless, which is
+		// rate-limited per IP but works.
+		GoogleBooksAPIKey: strings.TrimSpace(os.Getenv("GOOGLE_BOOKS_API_KEY")),
 	}, nil
 }
 
