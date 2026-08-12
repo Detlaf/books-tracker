@@ -34,10 +34,21 @@
 
 ## Milestone 3 — Book Search & Metadata
 
-- Integrate external book API (Open Library or Google Books)
-- `GET /books/search?q=` — search by title or author, proxies external API
-- `GET /books/isbn/:isbn` — lookup by ISBN code
-- Cache results in local `books` table to avoid redundant external calls
+- Google Books is the metadata provider; `GOOGLE_BOOKS_API_KEY` is optional and the server
+  falls back to keyless calls
+- `GET /books/search?q=&page=&limit=` — search by title or author. `limit` defaults to 20 and is
+  capped at 40 (Google's `maxResults` ceiling); `page` is 1-based
+- `GET /books/isbn/:isbn` — ISBN-10 and ISBN-13, normalized and checksum-validated locally so a
+  typo costs no upstream call
+- Both endpoints sit behind `RequireAuth`: each call spends API quota and writes book rows
+- Every result is upserted into `books`, keyed by the Google volume ID in the new unique
+  `books.external_id`, so search results carry the local `book_id` that Milestones 4–6 address
+- Authors moved from `books.author` into `book_authors(book_id, name, position)` in migration
+  `000005`, which backfills existing rows at position 0. Milestone 7's top-authors report groups
+  on this table, so a co-authored book counts for each author
+- Upstream failures are 502, except Google's 429 which is passed through; provider detail is
+  logged and never returned, because an error body can echo the API key in the request URL
+- Design: `docs/superpowers/specs/2026-08-12-book-search-design.md`
 
 ## Milestone 4 — Reading Status
 
