@@ -9,26 +9,29 @@ import (
 	"github.com/kate/book-tracking/internal/auth"
 	"github.com/kate/book-tracking/internal/books"
 	"github.com/kate/book-tracking/internal/config"
+	"github.com/kate/book-tracking/internal/library"
 	"github.com/kate/book-tracking/internal/store"
 )
 
 type Server struct {
-	db     *sql.DB
-	router *gin.Engine
-	auth   *auth.Service
-	books  *books.Service
-	signer *auth.Signer
+	db      *sql.DB
+	router  *gin.Engine
+	auth    *auth.Service
+	books   *books.Service
+	library *library.Service
+	signer  *auth.Signer
 }
 
 func New(db *sql.DB, cfg config.Config) *Server {
 	signer := auth.NewSigner(cfg.JWTSecret, cfg.AccessTTL)
 	sqlStore := store.New(db)
 	s := &Server{
-		db:     db,
-		router: gin.Default(),
-		auth:   auth.NewService(sqlStore, signer, cfg.RefreshTTL),
-		books:  books.NewService(books.NewGoogleBooks(cfg.GoogleBooksAPIKey), sqlStore),
-		signer: signer,
+		db:      db,
+		router:  gin.Default(),
+		auth:    auth.NewService(sqlStore, signer, cfg.RefreshTTL),
+		books:   books.NewService(books.NewGoogleBooks(cfg.GoogleBooksAPIKey), sqlStore),
+		library: library.NewService(sqlStore),
+		signer:  signer,
 	}
 	s.routes()
 	return s
@@ -51,6 +54,10 @@ func (s *Server) routes() {
 	// Behind auth because every call spends API quota and writes book rows.
 	authed.GET("/books/search", s.handleBookSearch)
 	authed.GET("/books/isbn/:isbn", s.handleBookByISBN)
+	authed.GET("/library", s.handleLibraryList)
+	authed.POST("/library", s.handleLibraryAdd)
+	authed.PATCH("/library/:book_id", s.handleLibraryUpdate)
+	authed.DELETE("/library/:book_id", s.handleLibraryDelete)
 }
 
 // Handler exposes the router for tests and for embedding behind another mux.

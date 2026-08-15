@@ -61,6 +61,7 @@
   - `read` → `backlog` / `reading`: clear `finished_at` back to NULL
   - Reject an explicit `finished_at` in the future, or one paired with a non-`read` status
 - `DELETE /library/:book_id` — remove a book from the library
+- Design: `docs/superpowers/specs/2026-08-15-reading-status-design.md`
 
 ## Milestone 5 — Ratings
 
