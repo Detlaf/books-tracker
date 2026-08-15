@@ -18,6 +18,13 @@ type tokenPairResponse struct {
 
 func doJSON(t *testing.T, srv *Server, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
+	return doJSONWithHeader(t, srv, method, path, body, "")
+}
+
+// doJSONWithHeader is doJSON with an Authorization header, which every route
+// behind RequireAuth needs.
+func doJSONWithHeader(t *testing.T, srv *Server, method, path string, body any, authHeader string) *httptest.ResponseRecorder {
+	t.Helper()
 	var buf bytes.Buffer
 	if body != nil {
 		if err := json.NewEncoder(&buf).Encode(body); err != nil {
@@ -26,6 +33,9 @@ func doJSON(t *testing.T, srv *Server, method, path string, body any) *httptest.
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	return rec
@@ -33,14 +43,21 @@ func doJSON(t *testing.T, srv *Server, method, path string, body any) *httptest.
 
 func registerAndLogin(t *testing.T, srv *Server) tokenPairResponse {
 	t.Helper()
-	creds := map[string]string{"email": "a@b.com", "password": "password123"}
+	return registerAndLoginAs(t, srv, "a@b.com")
+}
+
+// registerAndLoginAs registers and logs in one account. Cross-user tests need
+// a second one, and the email is the only thing that differs.
+func registerAndLoginAs(t *testing.T, srv *Server, email string) tokenPairResponse {
+	t.Helper()
+	creds := map[string]string{"email": email, "password": "password123"}
 
 	if rec := doJSON(t, srv, http.MethodPost, "/auth/register", creds); rec.Code != http.StatusCreated {
-		t.Fatalf("register: status %d, body %s", rec.Code, rec.Body)
+		t.Fatalf("register %s: status %d, body %s", email, rec.Code, rec.Body)
 	}
 	rec := doJSON(t, srv, http.MethodPost, "/auth/login", creds)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("login: status %d, body %s", rec.Code, rec.Body)
+		t.Fatalf("login %s: status %d, body %s", email, rec.Code, rec.Body)
 	}
 	var pair tokenPairResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &pair); err != nil {
