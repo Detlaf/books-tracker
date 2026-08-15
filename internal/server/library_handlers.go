@@ -20,7 +20,7 @@ import (
 // Status is required: defaulting it would make the most common mistake,
 // omitting it, invisible.
 type addLibraryRequest struct {
-	BookID     int64   `json:"book_id"     binding:"required"`
+	BookID     int64   `json:"book_id"     binding:"required,gt=0"`
 	Status     string  `json:"status"      binding:"required"`
 	FinishedAt *string `json:"finished_at"`
 }

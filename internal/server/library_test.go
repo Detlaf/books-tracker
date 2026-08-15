@@ -166,6 +166,7 @@ func TestAddToLibraryRejectsBadInput(t *testing.T) {
 		{"missing status", map[string]any{"book_id": bookID}},
 		{"bad status", map[string]any{"book_id": bookID, "status": "finished"}},
 		{"missing book_id", map[string]any{"status": "backlog"}},
+		{"negative book_id", map[string]any{"book_id": -1, "status": "backlog"}},
 		{"future finished_at", map[string]any{"book_id": bookID, "status": "read", "finished_at": future}},
 		{"finished_at with reading", map[string]any{"book_id": bookID, "status": "reading", "finished_at": "2026-01-01T00:00:00Z"}},
 		{"unparseable finished_at", map[string]any{"book_id": bookID, "status": "read", "finished_at": "yesterday"}},
