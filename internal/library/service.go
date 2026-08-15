@@ -113,7 +113,10 @@ func resolveFinishedAt(current *Entry, status Status, requested *time.Time, now 
 	}
 	if current != nil && current.FinishedAt != nil {
 		// Re-marking a book read must not rewrite a date the user set.
-		return current.FinishedAt, nil
+		// Copy rather than alias: the caller owns the Entry we were handed,
+		// and every other return path here is already UTC-normalized.
+		t := current.FinishedAt.UTC()
+		return &t, nil
 	}
 	utc := now.UTC()
 	return &utc, nil

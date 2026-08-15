@@ -225,6 +225,28 @@ func TestUpdateToReadKeepsAnExistingDate(t *testing.T) {
 	}
 }
 
+// resolveFinishedAt must not hand back the caller's *time.Time on the
+// left-alone path: mutating the pointer the fake store still holds must not
+// change what Update already returned.
+func TestUpdateToReadDoesNotAliasTheStoredPointer(t *testing.T) {
+	f := newFakeStore()
+	original := fixedNow.Add(-48 * time.Hour)
+	storedFinishedAt := ptrTime(original)
+	seed(f, 42, StatusRead, storedFinishedAt)
+	svc := newTestService(f)
+
+	got, err := svc.Update(context.Background(), 1, 42, ptrStatus(StatusRead), nil)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	*storedFinishedAt = fixedNow.Add(-1 * time.Hour)
+
+	if got.FinishedAt == nil || !got.FinishedAt.Equal(original) {
+		t.Fatalf("FinishedAt = %v after mutating the store's pointer, want the original %v", got.FinishedAt, original)
+	}
+}
+
 func TestUpdateToReadWithExplicitDateOverwrites(t *testing.T) {
 	f := newFakeStore()
 	seed(f, 42, StatusRead, ptrTime(fixedNow.Add(-48*time.Hour)))
