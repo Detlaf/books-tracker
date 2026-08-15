@@ -20,6 +20,16 @@ func seedUser(t *testing.T, s *SQLite, email string) int64 {
 	return u.ID
 }
 
+// mustBeUTC pins the milestone's "timestamps are RFC 3339 UTC" guarantee.
+// time.Time.Equal ignores location, so a value-only comparison would let a
+// non-UTC location slip through unnoticed.
+func mustBeUTC(t *testing.T, label string, tm time.Time) {
+	t.Helper()
+	if tm.Location() != time.UTC {
+		t.Fatalf("%s location = %v, want UTC", label, tm.Location())
+	}
+}
+
 func seedBook(t *testing.T, s *SQLite, externalID, title string, authors []string) int64 {
 	t.Helper()
 	stored, err := s.UpsertBooks(context.Background(), []books.Book{{
@@ -59,6 +69,7 @@ func TestAddEntryRoundTrips(t *testing.T) {
 	if added.AddedAt.IsZero() {
 		t.Fatal("AddedAt must be populated from created_at")
 	}
+	mustBeUTC(t, "AddedAt", added.AddedAt)
 
 	found, err := s.Entry(ctx, userID, bookID)
 	if err != nil {
@@ -67,6 +78,21 @@ func TestAddEntryRoundTrips(t *testing.T) {
 	if found.Status != added.Status || found.Book.ID != bookID {
 		t.Fatalf("round trip mismatch: %+v vs %+v", found, added)
 	}
+
+	// AddEntry always writes an already-UTC created_at, so the assertion
+	// above would pass even if scanEntry stopped normalizing: the driver
+	// hands back whatever offset the stored string carries. Store a
+	// non-UTC offset directly and confirm the read path still corrects it.
+	if _, err := s.db.Exec(
+		`UPDATE user_books SET created_at = ? WHERE user_id = ? AND book_id = ?`,
+		"2026-01-02 03:04:05-05:00", userID, bookID); err != nil {
+		t.Fatal(err)
+	}
+	reread, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	mustBeUTC(t, "AddedAt (non-UTC stored offset)", reread.AddedAt)
 }
 
 func TestAddEntryStoresFinishedAt(t *testing.T) {
@@ -83,6 +109,21 @@ func TestAddEntryStoresFinishedAt(t *testing.T) {
 	if added.FinishedAt == nil || !added.FinishedAt.Equal(finished) {
 		t.Fatalf("FinishedAt = %v, want %v", added.FinishedAt, finished)
 	}
+	mustBeUTC(t, "FinishedAt", *added.FinishedAt)
+
+	// As in TestAddEntryRoundTrips: AddEntry always writes an already-UTC
+	// finished_at, so the assertion above can't distinguish scanEntry's own
+	// normalization from the writer's. Store a non-UTC offset directly.
+	if _, err := s.db.Exec(
+		`UPDATE user_books SET finished_at = ? WHERE user_id = ? AND book_id = ?`,
+		"2026-01-02 03:04:05-05:00", userID, bookID); err != nil {
+		t.Fatal(err)
+	}
+	reread, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	mustBeUTC(t, "FinishedAt (non-UTC stored offset)", *reread.FinishedAt)
 }
 
 func TestAddEntryDuplicateIsAlreadyInLibrary(t *testing.T) {
@@ -223,6 +264,32 @@ func TestUpdateEntryMissingRow(t *testing.T) {
 	}
 }
 
+// The write must be scoped by user_id, not just readable results: user B's
+// PATCH on user A's book_id must fail, and must not touch A's row.
+func TestUpdateEntryIsScopedToTheUser(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	a := seedUser(t, s, "a@b.com")
+	b := seedUser(t, s, "b@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, a, bookID, library.StatusReading, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	finished := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if _, err := s.UpdateEntry(ctx, b, bookID, library.StatusRead, &finished); !errors.Is(err, library.ErrNotInLibrary) {
+		t.Fatalf("err = %v, want ErrNotInLibrary", err)
+	}
+
+	entry, err := s.Entry(ctx, a, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if entry.Status != library.StatusReading || entry.FinishedAt != nil {
+		t.Fatalf("user B's update leaked into user A's entry: %+v", entry)
+	}
+}
+
 func TestDeleteEntryRemovesTheRowButNotTheBook(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -258,8 +325,34 @@ func TestDeleteEntryMissingRow(t *testing.T) {
 	}
 }
 
-// seedLibrary gives userID three books: Anathem (backlog, no date),
-// Blindsight (read, finished 2026-01-01), Cryptonomicon (read, 2026-02-01).
+// Mirrors TestUpdateEntryIsScopedToTheUser: user B's DELETE on user A's
+// book_id must fail, and A's row must still be there afterwards.
+func TestDeleteEntryIsScopedToTheUser(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	a := seedUser(t, s, "a@b.com")
+	b := seedUser(t, s, "b@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, a, bookID, library.StatusReading, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteEntry(ctx, b, bookID); !errors.Is(err, library.ErrNotInLibrary) {
+		t.Fatalf("err = %v, want ErrNotInLibrary", err)
+	}
+
+	if _, err := s.Entry(ctx, a, bookID); err != nil {
+		t.Fatalf("user B's delete removed user A's entry: %v", err)
+	}
+}
+
+// seedLibrary gives userID four books: Anathem (backlog, no date),
+// Blindsight (read, finished 2026-01-01), Cryptonomicon (read, 2026-02-01),
+// Waypoint (reading, no date). Anathem and Waypoint are both unfinished so
+// finished_at ordering has a NULL at each end of book_id space, and Waypoint
+// sorts last by title/added_at but not by finished_at — that mismatch is
+// what keeps the finished_at sort tests from coinciding with the title/
+// added_at ones.
 func seedLibrary(t *testing.T, s *SQLite, userID int64) map[string]int64 {
 	t.Helper()
 	ctx := context.Background()
@@ -267,6 +360,7 @@ func seedLibrary(t *testing.T, s *SQLite, userID int64) map[string]int64 {
 		"Anathem":       seedBook(t, s, "vol-a", "Anathem", []string{"Neal Stephenson"}),
 		"Blindsight":    seedBook(t, s, "vol-b", "Blindsight", []string{"Peter Watts"}),
 		"Cryptonomicon": seedBook(t, s, "vol-c", "Cryptonomicon", []string{"Neal Stephenson"}),
+		"Waypoint":      seedBook(t, s, "vol-w", "Waypoint", []string{"Ann Leckie"}),
 	}
 	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
@@ -280,12 +374,15 @@ func seedLibrary(t *testing.T, s *SQLite, userID int64) map[string]int64 {
 	if _, err := s.AddEntry(ctx, userID, ids["Cryptonomicon"], library.StatusRead, &feb); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.AddEntry(ctx, userID, ids["Waypoint"], library.StatusReading, nil); err != nil {
+		t.Fatal(err)
+	}
 
-	// created_at is stamped from the wall clock, and three inserts in a row
+	// created_at is stamped from the wall clock, and four inserts in a row
 	// can land in the same instant. Pin them a day apart so the added_at
 	// ordering test asserts on a known sequence rather than on timing.
 	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	for i, title := range []string{"Anathem", "Blindsight", "Cryptonomicon"} {
+	for i, title := range []string{"Anathem", "Blindsight", "Cryptonomicon", "Waypoint"} {
 		if _, err := s.db.Exec(
 			`UPDATE user_books SET created_at = ? WHERE user_id = ? AND book_id = ?`,
 			base.Add(time.Duration(i)*24*time.Hour), userID, ids[title]); err != nil {
@@ -331,7 +428,7 @@ func TestListEntriesNoFilterReturnsEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEntries: %v", err)
 	}
-	if !slices.Equal(titles(got), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
+	if !slices.Equal(titles(got), []string{"Anathem", "Blindsight", "Cryptonomicon", "Waypoint"}) {
 		t.Fatalf("titles = %v", titles(got))
 	}
 }
@@ -348,7 +445,7 @@ func TestListEntriesSortsByTitleBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
+	if !slices.Equal(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon", "Waypoint"}) {
 		t.Fatalf("ascending titles = %v", titles(asc))
 	}
 
@@ -358,7 +455,7 @@ func TestListEntriesSortsByTitleBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
+	if !slices.Equal(titles(desc), []string{"Waypoint", "Cryptonomicon", "Blindsight", "Anathem"}) {
 		t.Fatalf("descending titles = %v", titles(desc))
 	}
 }
@@ -375,7 +472,7 @@ func TestListEntriesSortsByAddedAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
+	if !slices.Equal(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon", "Waypoint"}) {
 		t.Fatalf("added_at ascending = %v, want insertion order", titles(asc))
 	}
 
@@ -385,13 +482,17 @@ func TestListEntriesSortsByAddedAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
+	if !slices.Equal(titles(desc), []string{"Waypoint", "Cryptonomicon", "Blindsight", "Anathem"}) {
 		t.Fatalf("added_at descending = %v", titles(desc))
 	}
 }
 
 // An unfinished book must never displace a finished one at the top of the
-// list, in either direction.
+// list, in either direction. Anathem and Waypoint are both unfinished, so
+// each direction also has to place two NULLs correctly relative to each
+// other (by book_id) — and neither expected sequence here matches the
+// title or added_at orderings for the same fixture, so this can't pass by
+// accident of a sort that isn't actually keyed on finished_at.
 func TestListEntriesSortsNullFinishedAtLast(t *testing.T) {
 	s := newTestStore(t)
 	userID := seedUser(t, s, "a@b.com")
@@ -404,7 +505,7 @@ func TestListEntriesSortsNullFinishedAtLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(asc), []string{"Blindsight", "Cryptonomicon", "Anathem"}) {
+	if !slices.Equal(titles(asc), []string{"Blindsight", "Cryptonomicon", "Anathem", "Waypoint"}) {
 		t.Fatalf("finished_at ascending = %v, want NULL last", titles(asc))
 	}
 
@@ -414,7 +515,7 @@ func TestListEntriesSortsNullFinishedAtLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
+	if !slices.Equal(titles(desc), []string{"Cryptonomicon", "Blindsight", "Waypoint", "Anathem"}) {
 		t.Fatalf("finished_at descending = %v, want NULL last", titles(desc))
 	}
 }
@@ -441,7 +542,7 @@ func TestListEntriesPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(titles(second), []string{"Cryptonomicon"}) {
+	if !slices.Equal(titles(second), []string{"Cryptonomicon", "Waypoint"}) {
 		t.Fatalf("page 2 = %v", titles(second))
 	}
 }
@@ -449,7 +550,22 @@ func TestListEntriesPages(t *testing.T) {
 func TestListEntriesLoadsAuthors(t *testing.T) {
 	s := newTestStore(t)
 	userID := seedUser(t, s, "a@b.com")
-	seedLibrary(t, s, userID)
+	ids := seedLibrary(t, s, userID)
+
+	// Every writer in this codebase already stores UTC-formatted timestamps,
+	// so a plain Location() check below would pass even if scanEntry stopped
+	// normalizing. Store one row's created_at and finished_at with a non-UTC
+	// offset directly, so the assertions are pinned to scanEntry's own work.
+	if _, err := s.db.Exec(
+		`UPDATE user_books SET created_at = ? WHERE user_id = ? AND book_id = ?`,
+		"2026-06-01 00:00:00-05:00", userID, ids["Anathem"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE user_books SET finished_at = ? WHERE user_id = ? AND book_id = ?`,
+		"2026-01-01 00:00:00-05:00", userID, ids["Blindsight"]); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := s.ListEntries(context.Background(), library.ListParams{
 		UserID: userID, Sort: library.SortTitle, Page: 1, Limit: 20,
@@ -460,6 +576,10 @@ func TestListEntriesLoadsAuthors(t *testing.T) {
 	for _, e := range got {
 		if len(e.Book.Authors) == 0 {
 			t.Fatalf("%q lost its authors", e.Book.Title)
+		}
+		mustBeUTC(t, e.Book.Title+" AddedAt", e.AddedAt)
+		if e.FinishedAt != nil {
+			mustBeUTC(t, e.Book.Title+" FinishedAt", *e.FinishedAt)
 		}
 	}
 	if got[0].Book.Authors[0] != "Neal Stephenson" {
