@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"math"
 	"time"
 )
 
@@ -72,6 +73,23 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Entry, error) {
 	}
 	if p.Limit > MaxListLimit {
 		p.Limit = MaxListLimit
+	}
+	// The store computes the SQL OFFSET as (Page-1)*Limit. A large enough
+	// Page overflows that product negative, and SQLite clamps a negative
+	// OFFSET to zero — silently returning page 1's rows labeled as the
+	// requested page, rather than an error or an empty page. Clamp Page so
+	// the store never receives one it cannot offset.
+	//
+	// The comparison is written as (Page-1) > MaxInt/Limit rather than
+	// Page > MaxInt/Limit+1: Page is itself an int, so Page-1 can never
+	// exceed MaxInt/1 == MaxInt when Limit == 1, meaning this branch is
+	// simply never taken in that case. Pre-computing MaxInt/Limit+1 up
+	// front, by contrast, overflows on its own at Limit == 1 (MaxInt+1
+	// wraps to a large negative number), which would make the guard clamp
+	// every Page down to a negative value — the very bug it exists to
+	// prevent.
+	if p.Page-1 > math.MaxInt/p.Limit {
+		p.Page = math.MaxInt/p.Limit + 1
 	}
 	if p.Sort == "" {
 		p.Sort = DefaultSort

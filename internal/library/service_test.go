@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -389,6 +390,24 @@ func TestListCapsLimit(t *testing.T) {
 	}
 	if f.listParams.Limit != MaxListLimit {
 		t.Fatalf("Limit = %d, want %d", f.listParams.Limit, MaxListLimit)
+	}
+}
+
+// A page number near math.MaxInt would make the store's (Page-1)*Limit
+// overflow negative; SQLite then clamps a negative OFFSET to zero and
+// returns page 1's rows mislabeled as the huge page. List must clamp Page
+// before it reaches the store.
+func TestListClampsHugePageSoTheOffsetCannotOverflow(t *testing.T) {
+	f := newFakeStore()
+	svc := newTestService(f)
+
+	_, err := svc.List(context.Background(), ListParams{UserID: 1, Page: math.MaxInt, Limit: 100})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	offset := (f.listParams.Page - 1) * f.listParams.Limit
+	if offset < 0 {
+		t.Fatalf("offset = %d, want non-negative (Page=%d, Limit=%d)", offset, f.listParams.Page, f.listParams.Limit)
 	}
 }
 
