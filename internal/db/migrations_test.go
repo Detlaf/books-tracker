@@ -73,3 +73,19 @@ func TestMigration5ExternalIDIsUnique(t *testing.T) {
 		t.Fatalf("NULL external_id must not collide: %v", err)
 	}
 }
+
+func TestUserBooksUserStatusIndexExists(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer database.Close()
+
+	var name string
+	err = database.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
+		"idx_user_books_user_status").Scan(&name)
+	if err != nil {
+		t.Fatalf("idx_user_books_user_status must exist after migrations: %v", err)
+	}
+}
