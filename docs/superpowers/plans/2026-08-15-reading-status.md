@@ -985,6 +985,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -1284,18 +1285,6 @@ func titles(entries []library.Entry) []string {
 	return out
 }
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func TestListEntriesFiltersByStatus(t *testing.T) {
 	s := newTestStore(t)
 	userID := seedUser(t, s, "a@b.com")
@@ -1308,7 +1297,7 @@ func TestListEntriesFiltersByStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEntries: %v", err)
 	}
-	if !equalStrings(titles(got), []string{"Anathem"}) {
+	if !slices.Equal(titles(got), []string{"Anathem"}) {
 		t.Fatalf("titles = %v, want [Anathem]", titles(got))
 	}
 }
@@ -1324,7 +1313,7 @@ func TestListEntriesNoFilterReturnsEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEntries: %v", err)
 	}
-	if !equalStrings(titles(got), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
+	if !slices.Equal(titles(got), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
 		t.Fatalf("titles = %v", titles(got))
 	}
 }
@@ -1341,7 +1330,7 @@ func TestListEntriesSortsByTitleBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
+	if !slices.Equal(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
 		t.Fatalf("ascending titles = %v", titles(asc))
 	}
 
@@ -1351,7 +1340,7 @@ func TestListEntriesSortsByTitleBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
+	if !slices.Equal(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
 		t.Fatalf("descending titles = %v", titles(desc))
 	}
 }
@@ -1368,7 +1357,7 @@ func TestListEntriesSortsByAddedAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
+	if !slices.Equal(titles(asc), []string{"Anathem", "Blindsight", "Cryptonomicon"}) {
 		t.Fatalf("added_at ascending = %v, want insertion order", titles(asc))
 	}
 
@@ -1378,7 +1367,7 @@ func TestListEntriesSortsByAddedAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
+	if !slices.Equal(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
 		t.Fatalf("added_at descending = %v", titles(desc))
 	}
 }
@@ -1397,7 +1386,7 @@ func TestListEntriesSortsNullFinishedAtLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(asc), []string{"Blindsight", "Cryptonomicon", "Anathem"}) {
+	if !slices.Equal(titles(asc), []string{"Blindsight", "Cryptonomicon", "Anathem"}) {
 		t.Fatalf("finished_at ascending = %v, want NULL last", titles(asc))
 	}
 
@@ -1407,7 +1396,7 @@ func TestListEntriesSortsNullFinishedAtLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
+	if !slices.Equal(titles(desc), []string{"Cryptonomicon", "Blindsight", "Anathem"}) {
 		t.Fatalf("finished_at descending = %v, want NULL last", titles(desc))
 	}
 }
@@ -1424,7 +1413,7 @@ func TestListEntriesPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(first), []string{"Anathem", "Blindsight"}) {
+	if !slices.Equal(titles(first), []string{"Anathem", "Blindsight"}) {
 		t.Fatalf("page 1 = %v", titles(first))
 	}
 
@@ -1434,7 +1423,7 @@ func TestListEntriesPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(titles(second), []string{"Cryptonomicon"}) {
+	if !slices.Equal(titles(second), []string{"Cryptonomicon"}) {
 		t.Fatalf("page 2 = %v", titles(second))
 	}
 }
@@ -1836,8 +1825,7 @@ type libraryListBody struct {
 // behind RequireAuth.
 func doAuthedJSON(t *testing.T, srv *Server, method, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	rec := doJSONWithHeader(t, srv, method, path, body, "Bearer "+token)
-	return rec
+	return doJSONWithHeader(t, srv, method, path, body, "Bearer "+token)
 }
 
 // seedBookRow puts a book in the database directly, standing in for the
@@ -2185,32 +2173,12 @@ func TestListLibraryCapsLimit(t *testing.T) {
 	}
 }
 
-// registerSecondUser adds another account to the same server and returns its
-// token pair, so cross-user scoping can be asserted end to end.
-func registerSecondUser(t *testing.T, srv *Server) tokenPairResponse {
-	t.Helper()
-	creds := map[string]string{"email": "b@b.com", "password": "password123"}
-
-	if rec := doJSON(t, srv, http.MethodPost, "/auth/register", creds); rec.Code != http.StatusCreated {
-		t.Fatalf("register: %d %s", rec.Code, rec.Body)
-	}
-	rec := doJSON(t, srv, http.MethodPost, "/auth/login", creds)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login: %d %s", rec.Code, rec.Body)
-	}
-	var pair tokenPairResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &pair); err != nil {
-		t.Fatal(err)
-	}
-	return pair
-}
-
 // Another user's entry must be indistinguishable from one that does not
 // exist: 404 everywhere, never 403, and never visible in a list.
 func TestLibraryIsScopedToTheCaller(t *testing.T) {
 	srv := newTestServer(t)
 	a := registerAndLogin(t, srv)
-	b := registerSecondUser(t, srv)
+	b := registerAndLoginAs(t, srv, "b@b.com")
 	bookID := seedBookRow(t, srv, "vol-dune", "Dune", nil)
 
 	if rec := doAuthedJSON(t, srv, http.MethodPost, "/library", a.AccessToken,
@@ -2251,11 +2219,18 @@ func TestLibraryIsScopedToTheCaller(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Add the `doJSONWithHeader` test helper**
+- [ ] **Step 2: Extend the shared test helpers in `auth_test.go`**
 
-`doJSON` in `internal/server/auth_test.go` sends no Authorization header, and the library tests need one on every write. Add this next to it in `internal/server/auth_test.go`:
+Two helpers the library tests need. Both go in `internal/server/auth_test.go`, next to the existing `doJSON` and `registerAndLogin`.
+
+First, `doJSON` sends no Authorization header, and the library writes need one on every call. Rather than duplicate its body, make `doJSON` delegate:
 
 ```go
+func doJSON(t *testing.T, srv *Server, method, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	return doJSONWithHeader(t, srv, method, path, body, "")
+}
+
 // doJSONWithHeader is doJSON with an Authorization header, which every route
 // behind RequireAuth needs.
 func doJSONWithHeader(t *testing.T, srv *Server, method, path string, body any, authHeader string) *httptest.ResponseRecorder {
@@ -2274,6 +2249,35 @@ func doJSONWithHeader(t *testing.T, srv *Server, method, path string, body any, 
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	return rec
+}
+```
+
+Second, the cross-user scoping test needs a second account. `registerAndLogin` hardcodes `a@b.com`; it has 14 existing call sites, so rather than change its signature, extract the email as a parameter and keep the old name as a one-line delegate. **Replace** the existing `registerAndLogin` with these two functions and leave every existing call site alone:
+
+```go
+func registerAndLogin(t *testing.T, srv *Server) tokenPairResponse {
+	t.Helper()
+	return registerAndLoginAs(t, srv, "a@b.com")
+}
+
+// registerAndLoginAs registers and logs in one account. Cross-user tests need
+// a second one, and the email is the only thing that differs.
+func registerAndLoginAs(t *testing.T, srv *Server, email string) tokenPairResponse {
+	t.Helper()
+	creds := map[string]string{"email": email, "password": "password123"}
+
+	if rec := doJSON(t, srv, http.MethodPost, "/auth/register", creds); rec.Code != http.StatusCreated {
+		t.Fatalf("register %s: status %d, body %s", email, rec.Code, rec.Body)
+	}
+	rec := doJSON(t, srv, http.MethodPost, "/auth/login", creds)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login %s: status %d, body %s", email, rec.Code, rec.Body)
+	}
+	var pair tokenPairResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &pair); err != nil {
+		t.Fatal(err)
+	}
+	return pair
 }
 ```
 
