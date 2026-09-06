@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // MinSecretLen is the shortest JWT_SECRET accepted. Shorter keys weaken HS256
@@ -25,6 +27,10 @@ type Config struct {
 // than falling back to a generated key when JWT_SECRET is missing: a default
 // signing key is how a test secret reaches production.
 func Load() (Config, error) {
+	// Ignored when absent: .env is a local-dev convenience, not a
+	// requirement, and CI/production set the environment directly.
+	_ = godotenv.Load()
+
 	// Trimmed before the length check: `docker secret` and
 	// `kubectl create secret --from-file` both append a newline, and signing
 	// with it would give each environment a silently different key.
