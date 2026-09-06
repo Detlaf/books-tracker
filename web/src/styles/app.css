@@ -1,0 +1,162 @@
+/* App-level styles.
+ *
+ * The prototype carried these in its <helmet> block plus a large number of
+ * repeated inline style attributes. The repeated ones are lifted into classes
+ * here — same values, one definition — so a tweak to e.g. the cover tile does
+ * not have to be made in six places.
+ */
+
+body { margin: 0; }
+* { box-sizing: border-box; }
+
+/* — app shell — */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+.main-area { flex: 1; min-width: 0; padding: 36px 48px; overflow-y: auto; }
+
+.page-title { font-size: 34px; margin: 0 0 6px; }
+.page-subtitle { margin: 0 0 22px; }
+.section-heading { font-size: 15px; margin: 0 0 14px; }
+
+/* — side nav — */
+.side-nav {
+  width: 220px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 28px 14px;
+  border-right: 1px solid var(--color-divider);
+  background: var(--color-surface);
+}
+.side-nav .brand-label {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 21px;
+  padding: 0 10px 26px;
+  letter-spacing: -0.01em;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  background: transparent;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text);
+}
+.nav-item:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.nav-item.is-active { color: var(--color-accent); }
+.nav-item.is-active .nav-label { color: var(--color-accent); font-weight: 600; }
+.nav-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--color-divider);
+  padding-top: 16px;
+}
+.nav-user { padding: 0 10px; font-size: 12px; font-weight: 600; }
+.nav-count {
+  padding: 0 10px 6px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+.nav-logout {
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-accent-700);
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+/* — cover tiles — */
+.cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cover img { width: 100%; height: 100%; object-fit: cover; }
+
+/* — book grid — */
+.book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 20px; }
+.book-card {
+  cursor: pointer;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.book-card:hover { box-shadow: var(--shadow-sm); }
+
+/* — filter pills — */
+.pill {
+  padding: 7px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text);
+}
+.pill:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.pill.is-active { color: var(--color-accent); font-weight: 600; }
+
+.pill-sm {
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+.pill-sm.is-active { color: var(--color-accent); }
+
+/* — reports — */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 30px; }
+.stat-value { font-family: var(--font-heading); font-size: 34px; font-weight: 400; }
+.meter { height: 8px; border-radius: 4px; background: var(--color-neutral-200); overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--color-accent-500); }
+
+/* — misc — */
+.stranded-note {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  margin: 6px 0 0;
+}
+.form-error { font-size: 12px; color: var(--color-accent-700); margin: 0; }
+
+@media (max-width: 760px) {
+  .side-nav { width: 76px; padding: 20px 8px; }
+  .side-nav .nav-label { display: none; }
+  .side-nav .brand-label { display: none; }
+  .book-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .main-area { padding: 20px; }
+}

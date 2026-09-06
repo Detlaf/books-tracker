@@ -15,3 +15,5 @@
 
 # Subagent-driven development scratch
 .superpowers/
+
+.fastembed_cache/
