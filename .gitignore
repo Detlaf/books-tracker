@@ -13,6 +13,9 @@
 .vscode/
 .DS_Store
 
+# Local environment secrets
+.env
+
 # Subagent-driven development scratch
 .superpowers/
 
