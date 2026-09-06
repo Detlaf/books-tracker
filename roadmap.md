@@ -14,16 +14,21 @@
 
 ## Phase 2 — Web Frontend (Vue.js)
 
-- Project scaffold (Vite + Vue 3 + Vue Router + Pinia)
-- Book search UI: title, author, ISBN input
-- Book detail page with status selector and rating widget
-- Reading list views: backlog, currently reading, read
-- Collections management UI
-- Reporting/statistics page:
-  - Books read per year
-  - Breakdown by language
-  - Most-read authors
-- Auth pages (login / register)
+Implemented in `web/` from the design prototype `Book Tracker.dc.html`. See
+`web/README.md` for what is wired to the API and what is still browser-local.
+
+- [x] Project scaffold (Vite + Vue 3 + Vue Router + Pinia)
+- [x] Book search UI: title, author, ISBN input
+- [x] Book detail page with status selector and rating widget
+      (ratings are browser-local until Milestone 5)
+- [x] Reading list views: backlog, currently reading, read
+- [x] Collections management UI (browser-local until Milestone 6)
+- [x] Reporting/statistics page — computed client-side from `GET /library`
+      until Milestone 7 lands:
+  - [x] Books read per year
+  - [x] Breakdown by language
+  - [x] Most-read authors
+- [x] Auth pages (login / register)
 
 ## Phase 3 — Android App (Kotlin)
 
