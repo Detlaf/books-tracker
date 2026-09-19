@@ -86,6 +86,33 @@ func (f *fakeStore) DeleteEntry(_ context.Context, _, bookID int64) error {
 	return nil
 }
 
+func (f *fakeStore) SetRating(_ context.Context, _, bookID int64, score int) error {
+	if f.err != nil {
+		return f.err
+	}
+	e, ok := f.entries[bookID]
+	if !ok {
+		return ErrNotInLibrary
+	}
+	s := score
+	e.Rating = &s
+	f.entries[bookID] = e
+	return nil
+}
+
+func (f *fakeStore) ClearRating(_ context.Context, _, bookID int64) error {
+	if f.err != nil {
+		return f.err
+	}
+	e, ok := f.entries[bookID]
+	if !ok {
+		return ErrNotInLibrary
+	}
+	e.Rating = nil
+	f.entries[bookID] = e
+	return nil
+}
+
 func (f *fakeStore) ListEntries(_ context.Context, p ListParams) ([]Entry, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -421,5 +448,125 @@ func TestListNeverReturnsNil(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("List must return an empty slice, not nil")
+	}
+}
+
+func TestSetRatingOnReadEntrySucceeds(t *testing.T) {
+	f := newFakeStore()
+	seed(f, 42, StatusRead, ptrTime(fixedNow))
+	svc := newTestService(f)
+
+	got, err := svc.SetRating(context.Background(), 1, 42, 4)
+	if err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+	if got.Rating == nil || *got.Rating != 4 {
+		t.Fatalf("Rating = %v, want 4", got.Rating)
+	}
+}
+
+func TestSetRatingOverwritesExisting(t *testing.T) {
+	f := newFakeStore()
+	seed(f, 42, StatusRead, ptrTime(fixedNow))
+	svc := newTestService(f)
+
+	if _, err := svc.SetRating(context.Background(), 1, 42, 2); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+	got, err := svc.SetRating(context.Background(), 1, 42, 5)
+	if err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+	if got.Rating == nil || *got.Rating != 5 {
+		t.Fatalf("Rating = %v, want 5", got.Rating)
+	}
+}
+
+func TestSetRatingRejectsNonReadStatus(t *testing.T) {
+	for _, status := range []Status{StatusBacklog, StatusReading} {
+		f := newFakeStore()
+		seed(f, 42, status, nil)
+		svc := newTestService(f)
+
+		_, err := svc.SetRating(context.Background(), 1, 42, 3)
+		if !errors.Is(err, ErrRatingRequiresRead) {
+			t.Fatalf("status %s: err = %v, want ErrRatingRequiresRead", status, err)
+		}
+	}
+}
+
+func TestSetRatingRejectsOutOfRangeScore(t *testing.T) {
+	f := newFakeStore()
+	seed(f, 42, StatusRead, ptrTime(fixedNow))
+	svc := newTestService(f)
+
+	for _, score := range []int{0, 6, -1} {
+		_, err := svc.SetRating(context.Background(), 1, 42, score)
+		if !errors.Is(err, ErrInvalidRating) {
+			t.Fatalf("score %d: err = %v, want ErrInvalidRating", score, err)
+		}
+	}
+}
+
+// The score check must not depend on whether the entry exists: a bad score
+// is always a 400, even against a book the caller never added.
+func TestSetRatingRejectsOutOfRangeScoreBeforeLoadingEntry(t *testing.T) {
+	f := newFakeStore()
+	svc := newTestService(f)
+
+	_, err := svc.SetRating(context.Background(), 1, 999, 9)
+	if !errors.Is(err, ErrInvalidRating) {
+		t.Fatalf("err = %v, want ErrInvalidRating", err)
+	}
+}
+
+func TestSetRatingMissingEntryIsNotInLibrary(t *testing.T) {
+	f := newFakeStore()
+	svc := newTestService(f)
+
+	_, err := svc.SetRating(context.Background(), 1, 42, 3)
+	if !errors.Is(err, ErrNotInLibrary) {
+		t.Fatalf("err = %v, want ErrNotInLibrary", err)
+	}
+}
+
+func TestClearRatingRemovesExisting(t *testing.T) {
+	f := newFakeStore()
+	seed(f, 42, StatusRead, ptrTime(fixedNow))
+	svc := newTestService(f)
+	if _, err := svc.SetRating(context.Background(), 1, 42, 4); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if err := svc.ClearRating(context.Background(), 1, 42); err != nil {
+		t.Fatalf("ClearRating: %v", err)
+	}
+	got, err := f.Entry(context.Background(), 1, 42)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating != nil {
+		t.Fatalf("Rating = %v, want nil after clear", got.Rating)
+	}
+}
+
+// Clearing a rating that was never set is still success: DELETE is
+// idempotent.
+func TestClearRatingWithoutExistingRatingIsNoop(t *testing.T) {
+	f := newFakeStore()
+	seed(f, 42, StatusRead, ptrTime(fixedNow))
+	svc := newTestService(f)
+
+	if err := svc.ClearRating(context.Background(), 1, 42); err != nil {
+		t.Fatalf("ClearRating: %v", err)
+	}
+}
+
+func TestClearRatingMissingEntryIsNotInLibrary(t *testing.T) {
+	f := newFakeStore()
+	svc := newTestService(f)
+
+	if err := svc.ClearRating(context.Background(), 1, 42); !errors.Is(err, ErrNotInLibrary) {
+		t.Fatalf("err = %v, want ErrNotInLibrary", err)
 	}
 }

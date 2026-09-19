@@ -26,4 +26,8 @@ var (
 	// ErrEmptyUpdate means a PATCH carried neither status nor finished_at.
 	// That is always a client bug, never a meaningful no-op.
 	ErrEmptyUpdate = errors.New("update must set status or finished_at")
+	// ErrInvalidRating means the score was not between 1 and 5.
+	ErrInvalidRating = errors.New("rating must be between 1 and 5")
+	// ErrRatingRequiresRead means the entry's status is not read.
+	ErrRatingRequiresRead = errors.New("book must be marked read to be rated")
 )
