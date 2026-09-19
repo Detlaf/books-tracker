@@ -72,9 +72,9 @@ export async function runImport(records, { library, ratings }, onProgress = () =
         result.added++
       }
 
-      // Ratings are local-only until backend M5; an imported one is still
-      // worth keeping, and it lands in the same place the star widget reads.
-      if (record.rating > 0) ratings.set(book.id, record.rating)
+      // Ratings go through the same PUT the star widget uses; an imported
+      // one lands in the same place.
+      if (record.rating > 0) await ratings.set(book.id, record.rating)
     } catch (e) {
       result.failed.push(`${record.title} (${e.message})`)
     } finally {
