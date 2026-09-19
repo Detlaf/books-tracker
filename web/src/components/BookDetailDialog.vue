@@ -59,15 +59,38 @@ async function setStatus(status) {
 
 const rating = computed(() => (book.value ? ratings.get(book.value.id) : 0))
 
-// The rating widget is only meaningful on a finished book — the backend spec
-// for M5 rejects a rating unless status is read, so the UI enforces the same
-// rule now rather than letting users set something the API will later refuse.
+// The rating widget is only meaningful on a finished book — the backend
+// rejects a rating unless status is read, so the UI enforces the same rule
+// here rather than letting users attempt something the API will refuse.
 const canRate = computed(() => entry.value?.status === 'read')
 
-// Clicking the star that is already lit clears the rating — the widget's only
-// way to say "no rating" without a separate control.
-function rate(n) {
-  ratings.set(book.value.id, rating.value === n ? 0 : n)
+// Clicking the star that is already lit clears the rating — the widget's
+// only way to say "no rating" without a separate control.
+async function rate(n) {
+  if (!book.value) return
+  const next = rating.value === n ? 0 : n
+  busy.value = true
+  error.value = ''
+  try {
+    await ratings.set(book.value.id, next)
+  } catch (e) {
+    error.value = e.message || 'Could not update that rating.'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function toggleCollection(collectionId) {
+  if (!book.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await collections.toggleBook(collectionId, book.value.id)
+  } catch (e) {
+    error.value = e.message || 'Could not update that collection.'
+  } finally {
+    busy.value = false
+  }
 }
 
 async function removeFromLibrary() {
@@ -126,7 +149,7 @@ async function removeFromLibrary() {
             type="button"
             class="star"
             :class="{ 'is-on': n <= rating }"
-            :disabled="!canRate"
+            :disabled="!canRate || busy"
             :aria-label="`${n} star${n > 1 ? 's' : ''}`"
             @click="rate(n)"
           >
@@ -134,7 +157,6 @@ async function removeFromLibrary() {
           </button>
         </div>
         <p v-if="!canRate" class="stranded-note">Mark this book as read to rate it.</p>
-        <p v-else class="stranded-note">Saved in this browser only — backend Milestone 5.</p>
       </div>
 
       <div>
@@ -146,7 +168,8 @@ async function removeFromLibrary() {
             type="button"
             class="tag"
             :class="collections.contains(c.id, book.id) ? 'tag-accent' : 'tag-outline'"
-            @click="collections.toggleBook(c.id, book.id)"
+            :disabled="busy"
+            @click="toggleCollection(c.id)"
           >
             {{ c.name }}
           </button>
