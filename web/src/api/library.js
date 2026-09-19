@@ -27,3 +27,11 @@ export function update(bookId, { status, finishedAt } = {}) {
 export function remove(bookId) {
   return request(`/library/${bookId}`, { method: 'DELETE' })
 }
+
+export function setRating(bookId, score) {
+  return request(`/library/${bookId}/rating`, { method: 'PUT', body: { score } })
+}
+
+export function clearRating(bookId) {
+  return request(`/library/${bookId}/rating`, { method: 'DELETE' })
+}
