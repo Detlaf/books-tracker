@@ -603,3 +603,154 @@ func TestListEntriesIsScopedToTheUser(t *testing.T) {
 		t.Fatalf("user B sees %d of user A's entries", len(got))
 	}
 }
+
+func TestSetRatingRoundTrips(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+
+	if err := s.SetRating(ctx, userID, bookID, 4); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	got, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating == nil || *got.Rating != 4 {
+		t.Fatalf("Rating = %v, want 4", got.Rating)
+	}
+}
+
+func TestSetRatingOverwrites(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	if err := s.SetRating(ctx, userID, bookID, 2); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if err := s.SetRating(ctx, userID, bookID, 5); err != nil {
+		t.Fatalf("SetRating (overwrite): %v", err)
+	}
+
+	got, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating == nil || *got.Rating != 5 {
+		t.Fatalf("Rating = %v, want 5", got.Rating)
+	}
+}
+
+func TestClearRating(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	if err := s.SetRating(ctx, userID, bookID, 3); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if err := s.ClearRating(ctx, userID, bookID); err != nil {
+		t.Fatalf("ClearRating: %v", err)
+	}
+
+	got, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating != nil {
+		t.Fatalf("Rating = %v, want nil", got.Rating)
+	}
+}
+
+// Clearing a rating that does not exist must not error: DELETE is
+// idempotent at the store layer too.
+func TestClearRatingWithoutExistingRating(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+
+	if err := s.ClearRating(ctx, userID, bookID); err != nil {
+		t.Fatalf("ClearRating: %v", err)
+	}
+}
+
+// A rating is keyed independently of user_books; a status change away from
+// read and back must not disturb it. (The service layer is what stops a
+// *new* rating being set on a non-read book — the store itself does not
+// enforce status.)
+func TestRatingSurvivesStatusChangeAwayAndBackToRead(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	if err := s.SetRating(ctx, userID, bookID, 4); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if _, err := s.UpdateEntry(ctx, userID, bookID, library.StatusBacklog, nil); err != nil {
+		t.Fatalf("UpdateEntry to backlog: %v", err)
+	}
+	if _, err := s.UpdateEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("UpdateEntry back to read: %v", err)
+	}
+
+	got, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating == nil || *got.Rating != 4 {
+		t.Fatalf("Rating = %v, want 4 to have survived the round trip", got.Rating)
+	}
+}
+
+func TestListEntriesIncludesRatings(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	rated := seedBook(t, s, "vol-a", "Rated", nil)
+	unrated := seedBook(t, s, "vol-b", "Unrated", nil)
+	if _, err := s.AddEntry(ctx, userID, rated, library.StatusRead, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEntry(ctx, userID, unrated, library.StatusRead, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRating(ctx, userID, rated, 5); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	entries, err := s.ListEntries(ctx, library.ListParams{UserID: userID, Sort: library.SortTitle, Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	if entries[0].Rating == nil || *entries[0].Rating != 5 {
+		t.Fatalf("rated entry Rating = %v, want 5", entries[0].Rating)
+	}
+	if entries[1].Rating != nil {
+		t.Fatalf("unrated entry Rating = %v, want nil", entries[1].Rating)
+	}
+}
