@@ -13,6 +13,8 @@ const library = useLibraryStore()
 
 const collection = computed(() => collections.find(props.id))
 const dragOver = ref(false)
+const busy = ref(false)
+const error = ref('')
 
 const books = computed(() =>
   (collection.value?.bookIds ?? [])
@@ -33,25 +35,66 @@ function onDragStart(event, bookId) {
   event.dataTransfer.effectAllowed = 'copy'
 }
 
-function onDrop(event) {
+async function addBook(bookId) {
+  busy.value = true
+  error.value = ''
+  try {
+    await collections.addBook(props.id, bookId)
+  } catch (e) {
+    error.value = e.message || 'Could not add that book.'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function onDrop(event) {
   dragOver.value = false
   const raw = event.dataTransfer.getData('text/plain')
   const bookId = Number(raw)
   // Book ids are integers from the API; anything else came from a drag that
   // did not start in this rail.
   if (!raw || Number.isNaN(bookId)) return
-  collections.addBook(props.id, bookId)
+  await addBook(bookId)
 }
 
-function renameCollection() {
+async function removeMember(bookId) {
+  busy.value = true
+  error.value = ''
+  try {
+    await collections.removeBook(props.id, bookId)
+  } catch (e) {
+    error.value = e.message || 'Could not remove that book.'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function renameCollection() {
   const next = window.prompt('Rename collection', collection.value.name)
-  if (next !== null) collections.rename(props.id, next)
+  if (next === null) return
+  busy.value = true
+  error.value = ''
+  try {
+    await collections.rename(props.id, next)
+  } catch (e) {
+    error.value = e.message || 'Could not rename that collection.'
+  } finally {
+    busy.value = false
+  }
 }
 
-function deleteCollection() {
+async function deleteCollection() {
   if (!window.confirm(`Delete "${collection.value.name}"? The books stay in your library.`)) return
-  collections.remove(props.id)
-  router.push({ name: 'collections' })
+  busy.value = true
+  error.value = ''
+  try {
+    await collections.remove(props.id)
+    router.push({ name: 'collections' })
+  } catch (e) {
+    error.value = e.message || 'Could not delete that collection.'
+  } finally {
+    busy.value = false
+  }
 }
 </script>
 
@@ -62,11 +105,12 @@ function deleteCollection() {
     <div class="head">
       <h1 class="detail-title">{{ collection.name }}</h1>
       <div class="head-actions">
-        <button class="btn btn-secondary" type="button" @click="renameCollection">Rename</button>
-        <button class="btn btn-secondary danger" type="button" @click="deleteCollection">Delete</button>
+        <button class="btn btn-secondary" type="button" :disabled="busy" @click="renameCollection">Rename</button>
+        <button class="btn btn-secondary danger" type="button" :disabled="busy" @click="deleteCollection">Delete</button>
       </div>
     </div>
     <p class="text-muted page-subtitle">Drag a book from your library onto the collection to add it.</p>
+    <p v-if="error" class="form-error">{{ error }}</p>
 
     <div class="layout">
       <div>
@@ -81,7 +125,7 @@ function deleteCollection() {
           >
             <BookCover :book="book" width="24px" height="32px" font-size="12px" />
             <span class="rail-title">{{ book.title }}</span>
-            <button class="rail-add" type="button" @click="collections.addBook(props.id, book.id)">+</button>
+            <button class="rail-add" type="button" :disabled="busy" @click="addBook(book.id)">+</button>
           </div>
           <p v-if="!available.length" class="text-muted rail-empty">Every book you track is already here.</p>
         </div>
@@ -100,7 +144,8 @@ function deleteCollection() {
               class="remove"
               type="button"
               :aria-label="`Remove ${book.title}`"
-              @click="collections.removeBook(props.id, book.id)"
+              :disabled="busy"
+              @click="removeMember(book.id)"
             >
               &times;
             </button>
