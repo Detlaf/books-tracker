@@ -58,6 +58,8 @@ func (s *Server) routes() {
 	authed.POST("/library", s.handleLibraryAdd)
 	authed.PATCH("/library/:book_id", s.handleLibraryUpdate)
 	authed.DELETE("/library/:book_id", s.handleLibraryDelete)
+	authed.PUT("/library/:book_id/rating", s.handleRatingSet)
+	authed.DELETE("/library/:book_id/rating", s.handleRatingDelete)
 }
 
 // Handler exposes the router for tests and for embedding behind another mux.
