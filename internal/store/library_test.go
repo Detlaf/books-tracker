@@ -724,7 +724,45 @@ func TestRatingSurvivesStatusChangeAwayAndBackToRead(t *testing.T) {
 	}
 }
 
-func TestDeleteEntryDoesNotOrphanTheRating(t *testing.T) {
+// DeleteEntry alone must not touch a rating: the ratings table has no FK
+// to user_books, and Service.Remove is what's responsible for the
+// explicit follow-up ClearRating call. This is the store-level fact that
+// makes that follow-up call necessary in the first place.
+func TestDeleteEntryAloneDoesNotClearTheRating(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	if err := s.SetRating(ctx, userID, bookID, 4); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if err := s.DeleteEntry(ctx, userID, bookID); err != nil {
+		t.Fatalf("DeleteEntry: %v", err)
+	}
+
+	// Re-add the same book id without ever calling ClearRating, and
+	// confirm the stale rating resurfaces — proving DeleteEntry alone
+	// does not clean it up.
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusBacklog, nil); err != nil {
+		t.Fatalf("re-AddEntry: %v", err)
+	}
+	got, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating == nil || *got.Rating != 4 {
+		t.Fatalf("Rating = %v, want the stale 4 to have resurfaced (this is the bug Service.Remove's ClearRating call fixes)", got.Rating)
+	}
+}
+
+// Confirms the store-level building block Service.Remove relies on:
+// calling ClearRating after DeleteEntry does prevent the resurfacing
+// TestDeleteEntryAloneDoesNotClearTheRating demonstrates.
+func TestDeleteEntryThenClearRatingPreventsResurfacing(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	userID := seedUser(t, s, "a@b.com")
@@ -740,7 +778,7 @@ func TestDeleteEntryDoesNotOrphanTheRating(t *testing.T) {
 		t.Fatalf("DeleteEntry: %v", err)
 	}
 	if err := s.ClearRating(ctx, userID, bookID); err != nil {
-		t.Fatalf("ClearRating after delete: %v", err)
+		t.Fatalf("ClearRating: %v", err)
 	}
 
 	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusBacklog, nil); err != nil {
@@ -751,7 +789,7 @@ func TestDeleteEntryDoesNotOrphanTheRating(t *testing.T) {
 		t.Fatalf("Entry: %v", err)
 	}
 	if got.Rating != nil {
-		t.Fatalf("Rating = %v, want nil after delete + re-add", got.Rating)
+		t.Fatalf("Rating = %v, want nil after DeleteEntry+ClearRating and re-add", got.Rating)
 	}
 }
 

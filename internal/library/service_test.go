@@ -20,9 +20,13 @@ func ptrTime(t time.Time) *time.Time { return &t }
 
 func ptrStatus(s Status) *Status { return &s }
 
-// fakeStore holds one user's entries in a map keyed by book ID.
+// fakeStore holds one user's entries in a map keyed by book ID. Ratings live
+// in a separate map, independent of entries, mirroring the real SQLite
+// schema where the ratings table has no FK to user_books: DeleteEntry must
+// not implicitly clear a rating, only an explicit ClearRating call does.
 type fakeStore struct {
 	entries map[int64]Entry
+	ratings map[int64]int
 	err     error
 
 	gotStatus     Status
@@ -30,7 +34,21 @@ type fakeStore struct {
 	listParams    ListParams
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{entries: map[int64]Entry{}} }
+func newFakeStore() *fakeStore {
+	return &fakeStore{entries: map[int64]Entry{}, ratings: map[int64]int{}}
+}
+
+// withRating fills in e.Rating from the ratings map at read time, since
+// Entry values in f.entries never carry a rating themselves.
+func (f *fakeStore) withRating(e Entry) Entry {
+	if s, ok := f.ratings[e.Book.ID]; ok {
+		score := s
+		e.Rating = &score
+	} else {
+		e.Rating = nil
+	}
+	return e
+}
 
 func (f *fakeStore) AddEntry(_ context.Context, _, bookID int64, status Status, finishedAt *time.Time) (Entry, error) {
 	if f.err != nil {
@@ -47,7 +65,7 @@ func (f *fakeStore) AddEntry(_ context.Context, _, bookID int64, status Status, 
 		AddedAt:    fixedNow,
 	}
 	f.entries[bookID] = e
-	return e, nil
+	return f.withRating(e), nil
 }
 
 func (f *fakeStore) Entry(_ context.Context, _, bookID int64) (Entry, error) {
@@ -58,7 +76,7 @@ func (f *fakeStore) Entry(_ context.Context, _, bookID int64) (Entry, error) {
 	if !ok {
 		return Entry{}, ErrNotInLibrary
 	}
-	return e, nil
+	return f.withRating(e), nil
 }
 
 func (f *fakeStore) UpdateEntry(_ context.Context, _, bookID int64, status Status, finishedAt *time.Time) (Entry, error) {
@@ -72,7 +90,7 @@ func (f *fakeStore) UpdateEntry(_ context.Context, _, bookID int64, status Statu
 	f.gotStatus, f.gotFinishedAt = status, finishedAt
 	e.Status, e.FinishedAt = status, finishedAt
 	f.entries[bookID] = e
-	return e, nil
+	return f.withRating(e), nil
 }
 
 func (f *fakeStore) DeleteEntry(_ context.Context, _, bookID int64) error {
@@ -90,13 +108,10 @@ func (f *fakeStore) SetRating(_ context.Context, _, bookID int64, score int) err
 	if f.err != nil {
 		return f.err
 	}
-	e, ok := f.entries[bookID]
-	if !ok {
+	if _, ok := f.entries[bookID]; !ok {
 		return ErrNotInLibrary
 	}
-	s := score
-	e.Rating = &s
-	f.entries[bookID] = e
+	f.ratings[bookID] = score
 	return nil
 }
 
@@ -108,12 +123,7 @@ func (f *fakeStore) ClearRating(_ context.Context, _, bookID int64) error {
 	if f.err != nil {
 		return f.err
 	}
-	e, ok := f.entries[bookID]
-	if !ok {
-		return nil
-	}
-	e.Rating = nil
-	f.entries[bookID] = e
+	delete(f.ratings, bookID)
 	return nil
 }
 
@@ -124,7 +134,7 @@ func (f *fakeStore) ListEntries(_ context.Context, p ListParams) ([]Entry, error
 	f.listParams = p
 	out := make([]Entry, 0, len(f.entries))
 	for _, e := range f.entries {
-		out = append(out, e)
+		out = append(out, f.withRating(e))
 	}
 	return out, nil
 }
@@ -414,6 +424,27 @@ func TestRemoveClearsAnyExistingRating(t *testing.T) {
 	}
 	if got.Rating != nil {
 		t.Fatalf("Rating = %v, want nil after remove + re-add", got.Rating)
+	}
+}
+
+// This is the store-level fact that makes Service.Remove's extra
+// ClearRating call necessary: DeleteEntry alone does not touch a rating,
+// so without that follow-up call a removed-then-re-added book would
+// resurface a stale rating.
+func TestDeleteEntryAloneDoesNotClearRating(t *testing.T) {
+	f := newFakeStore()
+	seed(f, 42, StatusRead, ptrTime(fixedNow))
+	svc := newTestService(f)
+	if _, err := svc.SetRating(context.Background(), 1, 42, 4); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if err := f.DeleteEntry(context.Background(), 1, 42); err != nil {
+		t.Fatalf("DeleteEntry: %v", err)
+	}
+
+	if _, ok := f.ratings[42]; !ok {
+		t.Fatal("DeleteEntry alone cleared the rating — it must not; Service.Remove's ClearRating call is what should do that")
 	}
 }
 
