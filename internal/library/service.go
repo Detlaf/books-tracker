@@ -59,7 +59,10 @@ func (s *Service) Update(ctx context.Context, userID, bookID int64, status *Stat
 }
 
 func (s *Service) Remove(ctx context.Context, userID, bookID int64) error {
-	return s.store.DeleteEntry(ctx, userID, bookID)
+	if err := s.store.DeleteEntry(ctx, userID, bookID); err != nil {
+		return err
+	}
+	return s.store.ClearRating(ctx, userID, bookID)
 }
 
 // List normalizes paging and sort before handing them to the store, so the
@@ -103,6 +106,38 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Entry, error) {
 		return []Entry{}, nil
 	}
 	return found, nil
+}
+
+// SetRating validates score and status, then upserts the rating. The score
+// range is checked before the entry is loaded so a malformed request never
+// depends on whether the book is in the caller's library.
+func (s *Service) SetRating(ctx context.Context, userID, bookID int64, score int) (Entry, error) {
+	if score < 1 || score > 5 {
+		return Entry{}, ErrInvalidRating
+	}
+
+	current, err := s.store.Entry(ctx, userID, bookID)
+	if err != nil {
+		return Entry{}, err
+	}
+	if current.Status != StatusRead {
+		return Entry{}, ErrRatingRequiresRead
+	}
+
+	if err := s.store.SetRating(ctx, userID, bookID, score); err != nil {
+		return Entry{}, err
+	}
+	return s.store.Entry(ctx, userID, bookID)
+}
+
+// ClearRating removes a rating if one exists. Only a missing library entry
+// is an error; a missing rating on an existing entry is success, matching
+// how DELETE /library/:book_id/rating is documented as idempotent.
+func (s *Service) ClearRating(ctx context.Context, userID, bookID int64) error {
+	if _, err := s.store.Entry(ctx, userID, bookID); err != nil {
+		return err
+	}
+	return s.store.ClearRating(ctx, userID, bookID)
 }
 
 // resolveFinishedAt decides what finished_at becomes. current is nil on an

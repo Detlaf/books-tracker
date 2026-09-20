@@ -8,30 +8,33 @@ import (
 
 	"github.com/kate/book-tracking/internal/auth"
 	"github.com/kate/book-tracking/internal/books"
+	"github.com/kate/book-tracking/internal/collections"
 	"github.com/kate/book-tracking/internal/config"
 	"github.com/kate/book-tracking/internal/library"
 	"github.com/kate/book-tracking/internal/store"
 )
 
 type Server struct {
-	db      *sql.DB
-	router  *gin.Engine
-	auth    *auth.Service
-	books   *books.Service
-	library *library.Service
-	signer  *auth.Signer
+	db          *sql.DB
+	router      *gin.Engine
+	auth        *auth.Service
+	books       *books.Service
+	library     *library.Service
+	collections *collections.Service
+	signer      *auth.Signer
 }
 
 func New(db *sql.DB, cfg config.Config) *Server {
 	signer := auth.NewSigner(cfg.JWTSecret, cfg.AccessTTL)
 	sqlStore := store.New(db)
 	s := &Server{
-		db:      db,
-		router:  gin.Default(),
-		auth:    auth.NewService(sqlStore, signer, cfg.RefreshTTL),
-		books:   books.NewService(books.NewGoogleBooks(cfg.GoogleBooksAPIKey), sqlStore),
-		library: library.NewService(sqlStore),
-		signer:  signer,
+		db:          db,
+		router:      gin.Default(),
+		auth:        auth.NewService(sqlStore, signer, cfg.RefreshTTL),
+		books:       books.NewService(books.NewGoogleBooks(cfg.GoogleBooksAPIKey), sqlStore),
+		library:     library.NewService(sqlStore),
+		collections: collections.NewService(sqlStore),
+		signer:      signer,
 	}
 	s.routes()
 	return s
@@ -58,6 +61,14 @@ func (s *Server) routes() {
 	authed.POST("/library", s.handleLibraryAdd)
 	authed.PATCH("/library/:book_id", s.handleLibraryUpdate)
 	authed.DELETE("/library/:book_id", s.handleLibraryDelete)
+	authed.PUT("/library/:book_id/rating", s.handleRatingSet)
+	authed.DELETE("/library/:book_id/rating", s.handleRatingDelete)
+	authed.GET("/collections", s.handleCollectionsList)
+	authed.POST("/collections", s.handleCollectionsCreate)
+	authed.PATCH("/collections/:id", s.handleCollectionsRename)
+	authed.DELETE("/collections/:id", s.handleCollectionsDelete)
+	authed.POST("/collections/:id/books", s.handleCollectionsAddBook)
+	authed.DELETE("/collections/:id/books/:book_id", s.handleCollectionsRemoveBook)
 }
 
 // Handler exposes the router for tests and for embedding behind another mux.

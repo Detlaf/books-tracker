@@ -1,47 +1,36 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-import { load, save } from '@/lib/localStore'
+import { useLibraryStore } from '@/stores/library'
+import { setRating, clearRating } from '@/api/library'
 
-// TODO(backend M5): ratings have no API yet. specs/backend/implementation.md
-// specifies PUT/DELETE /library/:book_id/rating with a 1-5 value, valid only
-// when the entry's status is read — and the `ratings` table already exists
-// from migration 000001. Until those endpoints land, ratings live in this
-// browser only: they do not sync across devices and they are lost if site data
-// is cleared. Swapping this store's body for API calls is the whole migration;
-// nothing outside it knows where the numbers come from.
+// Ratings are folded into library entries server-side (backend Milestone 5):
+// GET/POST/PATCH /library already return "rating", so this store holds no
+// state of its own — it reads through useLibraryStore() and writes through
+// the rating endpoints, patching the cached entry rather than refetching.
 
 export const useRatingsStore = defineStore('ratings', () => {
-  const byBookId = ref({})
-
-  function hydrate() {
-    byBookId.value = load('ratings', {})
-  }
-
-  watch(byBookId, (v) => save('ratings', v), { deep: true })
-
   function get(bookId) {
-    return byBookId.value[bookId] ?? 0
+    return useLibraryStore().byBookId.get(bookId)?.rating ?? 0
   }
 
   // Sets the exact value. Toggling off is the caller's decision — the star
-  // widget treats a click on the current rating as "clear", but an import must
-  // not silently undo a rating it is re-applying.
-  function set(bookId, rating) {
-    const next = { ...byBookId.value }
-    if (!rating) delete next[bookId]
-    else next[bookId] = Math.max(1, Math.min(5, rating))
-    byBookId.value = next
+  // widget treats a click on the current rating as "clear", but an import
+  // must not silently undo a rating it is re-applying.
+  async function set(bookId, rating) {
+    const library = useLibraryStore()
+    if (!rating) {
+      await clearRating(bookId)
+      library.applyRating(bookId, null)
+      return
+    }
+    const clamped = Math.max(1, Math.min(5, rating))
+    await setRating(bookId, clamped)
+    library.applyRating(bookId, clamped)
   }
 
-  function clear(bookId) {
-    const next = { ...byBookId.value }
-    delete next[bookId]
-    byBookId.value = next
+  async function clear(bookId) {
+    await clearRating(bookId)
+    useLibraryStore().applyRating(bookId, null)
   }
 
-  function reset() {
-    byBookId.value = {}
-  }
-
-  return { byBookId, hydrate, get, set, clear, reset }
+  return { get, set, clear }
 })

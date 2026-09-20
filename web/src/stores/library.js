@@ -54,6 +54,15 @@ export const useLibraryStore = defineStore('library', () => {
     else entries.value.unshift(entry)
   }
 
+  // Patches the cached entry's rating in place rather than refetching: the
+  // rating endpoints don't return a fresh library list, only the one entry
+  // the ratings store already has via setRating/clearRating's response.
+  function applyRating(bookId, rating) {
+    const i = entries.value.findIndex((e) => e.book.id === bookId)
+    if (i < 0) return
+    entries.value[i] = { ...entries.value[i], rating }
+  }
+
   async function add(bookId, status, finishedAt) {
     const entry = await libraryApi.add(bookId, status, finishedAt)
     upsert(entry)
@@ -89,6 +98,6 @@ export const useLibraryStore = defineStore('library', () => {
   return {
     entries, loading, error, loaded,
     byBookId, count, counts, filtered,
-    fetchAll, add, setStatus, setFinishedAt, remove, reset,
+    fetchAll, add, setStatus, setFinishedAt, remove, applyRating, reset,
   }
 })

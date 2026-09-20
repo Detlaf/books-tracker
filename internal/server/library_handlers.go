@@ -33,14 +33,15 @@ type updateLibraryRequest struct {
 	FinishedAt *string `json:"finished_at"`
 }
 
-// libraryEntryResponse reuses bookResponse unchanged. FinishedAt is a pointer
-// without omitempty so it is always present and explicitly null when unset: a
-// client distinguishing "not finished" from "field absent" should not have to
-// guess.
+// libraryEntryResponse reuses bookResponse unchanged. FinishedAt and Rating
+// are pointers without omitempty so they are always present and explicitly
+// null when unset: a client should not have to guess whether the field is
+// absent or the value is genuinely empty.
 type libraryEntryResponse struct {
 	Book       bookResponse `json:"book"`
 	Status     string       `json:"status"`
 	FinishedAt *string      `json:"finished_at"`
+	Rating     *int         `json:"rating"`
 	AddedAt    string       `json:"added_at"`
 }
 
@@ -54,6 +55,7 @@ func newLibraryEntryResponse(e library.Entry) libraryEntryResponse {
 		Book:       newBookResponse(e.Book),
 		Status:     string(e.Status),
 		FinishedAt: finishedAt,
+		Rating:     e.Rating,
 		AddedAt:    e.AddedAt.UTC().Format(time.RFC3339),
 	}
 }
@@ -72,6 +74,10 @@ func respondLibraryError(c *gin.Context, err error) {
 		respondError(c, http.StatusBadRequest, "finished_at must not be in the future")
 	case errors.Is(err, library.ErrFinishedAtNotRead):
 		respondError(c, http.StatusBadRequest, "finished_at is only valid with status read")
+	case errors.Is(err, library.ErrInvalidRating):
+		respondError(c, http.StatusBadRequest, "score must be between 1 and 5")
+	case errors.Is(err, library.ErrRatingRequiresRead):
+		respondError(c, http.StatusBadRequest, "book must be marked read to be rated")
 	case errors.Is(err, library.ErrEmptyUpdate):
 		respondError(c, http.StatusBadRequest, "update must set status or finished_at")
 	case errors.Is(err, library.ErrUnknownBook):
@@ -222,6 +228,46 @@ func (s *Server) handleLibraryDelete(c *gin.Context) {
 	}
 
 	if err := s.library.Remove(c.Request.Context(), userID(c), bookID); err != nil {
+		respondLibraryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ratingRequest uses the same "required" + range pattern addLibraryRequest
+// uses for BookID: zero and absent both fail "required", so they produce
+// the same 400 rather than a zero score sneaking through as "unset".
+type ratingRequest struct {
+	Score int `json:"score" binding:"required,gte=1,lte=5"`
+}
+
+func (s *Server) handleRatingSet(c *gin.Context) {
+	bookID, ok := libraryBookID(c)
+	if !ok {
+		return
+	}
+
+	var req ratingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	entry, err := s.library.SetRating(c.Request.Context(), userID(c), bookID, req.Score)
+	if err != nil {
+		respondLibraryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, newLibraryEntryResponse(entry))
+}
+
+func (s *Server) handleRatingDelete(c *gin.Context) {
+	bookID, ok := libraryBookID(c)
+	if !ok {
+		return
+	}
+
+	if err := s.library.ClearRating(c.Request.Context(), userID(c), bookID); err != nil {
 		respondLibraryError(c, err)
 		return
 	}

@@ -57,18 +57,14 @@ the only place the design's labels are attached to it.
 
 ## What is not backed by the API yet
 
-Three areas of the design have no endpoints behind them. They work, but only in
-the browser they were used in — `localStorage`, namespaced per user id.
+One area of the design has no endpoint behind it: display name and annual
+reading goal are not specified in any milestone, so `stores/settings.js`
+still persists them to `localStorage`, namespaced per user id.
 
-| Feature | Blocked on | Store |
-| --- | --- | --- |
-| 1–5 star ratings | Backend Milestone 5 (`PUT/DELETE /library/:book_id/rating`) | `stores/ratings.js` |
-| Collections | Backend Milestone 6 (`/collections`, `/collections/:id/books`) | `stores/collections.js` |
-| Display name, annual goal | No endpoint specified in any milestone | `stores/settings.js` |
-
-Each store is a single module whose body is the whole migration: swap the
-`localStorage` reads for API calls and nothing outside it changes. The
-`ratings` and `collections` tables already exist from migration `000001`.
+Ratings (backend Milestone 5, `PUT/DELETE /library/:book_id/rating`) and
+collections (backend Milestone 6, `/collections`, `/collections/:id/books`)
+are now backed by the API — `stores/ratings.js` and `stores/collections.js`
+call it directly and hold no `localStorage` state of their own.
 
 Two smaller gaps:
 

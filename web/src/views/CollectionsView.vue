@@ -9,6 +9,8 @@ const library = useLibraryStore()
 
 const showForm = ref(false)
 const newName = ref('')
+const busy = ref(false)
+const error = ref('')
 
 const cards = computed(() =>
   collections.items.map((c) => ({
@@ -25,10 +27,19 @@ const cards = computed(() =>
   })),
 )
 
-function create() {
-  if (collections.create(newName.value)) {
-    newName.value = ''
-    showForm.value = false
+async function create() {
+  busy.value = true
+  error.value = ''
+  try {
+    const created = await collections.create(newName.value)
+    if (created) {
+      newName.value = ''
+      showForm.value = false
+    }
+  } catch (e) {
+    error.value = e.message || 'Could not create that collection.'
+  } finally {
+    busy.value = false
   }
 }
 </script>
@@ -45,7 +56,8 @@ function create() {
       <label for="name">Collection name</label>
       <input id="name" v-model="newName" class="input" type="text" @keyup.enter="create" />
     </div>
-    <button class="btn btn-primary" type="button" @click="create">Create</button>
+    <button class="btn btn-primary" type="button" :disabled="busy" @click="create">Create</button>
+    <p v-if="error" class="form-error">{{ error }}</p>
   </div>
 
   <div class="book-grid wide">
@@ -73,7 +85,6 @@ function create() {
   <p v-if="!cards.length" class="text-muted empty">
     No collections yet — create one to start grouping books.
   </p>
-  <p class="stranded-note">Collections are saved in this browser only — backend Milestone 6.</p>
 </template>
 
 <style scoped>

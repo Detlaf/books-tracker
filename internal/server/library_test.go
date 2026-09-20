@@ -20,6 +20,7 @@ type libraryEntryBody struct {
 	} `json:"book"`
 	Status     string  `json:"status"`
 	FinishedAt *string `json:"finished_at"`
+	Rating     *int    `json:"rating"`
 	AddedAt    string  `json:"added_at"`
 }
 
@@ -424,5 +425,141 @@ func TestLibraryIsScopedToTheCaller(t *testing.T) {
 	}
 	if len(aBody.Items) != 1 || aBody.Items[0].Status != "read" {
 		t.Fatalf("user A's entry changed: %+v", aBody.Items)
+	}
+}
+
+func TestRatingRoutesRequireAuth(t *testing.T) {
+	srv := newTestServer(t)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPut, "/library/1/rating"},
+		{http.MethodDelete, "/library/1/rating"},
+	}
+	for _, c := range cases {
+		rec := doJSON(t, srv, c.method, c.path, nil)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s = %d, want 401", c.method, c.path, rec.Code)
+		}
+	}
+}
+
+func TestSetRatingReturns200WithRating(t *testing.T) {
+	srv := newTestServer(t)
+	pair := registerAndLogin(t, srv)
+	bookID := seedBookRow(t, srv, "vol-dune", "Dune", nil)
+	if rec := doAuthedJSON(t, srv, http.MethodPost, "/library", pair.AccessToken,
+		map[string]any{"book_id": bookID, "status": "read"}); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+
+	rec := doAuthedJSON(t, srv, http.MethodPut, fmt.Sprintf("/library/%d/rating", bookID),
+		pair.AccessToken, map[string]any{"score": 4})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+
+	var body libraryEntryBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Rating == nil || *body.Rating != 4 {
+		t.Fatalf("rating = %v, want 4", body.Rating)
+	}
+}
+
+func TestSetRatingRejectsBadScore(t *testing.T) {
+	srv := newTestServer(t)
+	pair := registerAndLogin(t, srv)
+	bookID := seedBookRow(t, srv, "vol-dune", "Dune", nil)
+	if rec := doAuthedJSON(t, srv, http.MethodPost, "/library", pair.AccessToken,
+		map[string]any{"book_id": bookID, "status": "read"}); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+
+	for _, body := range []map[string]any{
+		{"score": 0}, {"score": 6}, {},
+	} {
+		rec := doAuthedJSON(t, srv, http.MethodPut, fmt.Sprintf("/library/%d/rating", bookID),
+			pair.AccessToken, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body %v: status = %d, want 400: %s", body, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestSetRatingOnNonReadEntryIs400(t *testing.T) {
+	srv := newTestServer(t)
+	pair := registerAndLogin(t, srv)
+	bookID := seedBookRow(t, srv, "vol-dune", "Dune", nil)
+	if rec := doAuthedJSON(t, srv, http.MethodPost, "/library", pair.AccessToken,
+		map[string]any{"book_id": bookID, "status": "backlog"}); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+
+	rec := doAuthedJSON(t, srv, http.MethodPut, fmt.Sprintf("/library/%d/rating", bookID),
+		pair.AccessToken, map[string]any{"score": 3})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSetRatingMissingEntryIs404(t *testing.T) {
+	srv := newTestServer(t)
+	pair := registerAndLogin(t, srv)
+
+	rec := doAuthedJSON(t, srv, http.MethodPut, "/library/9999/rating", pair.AccessToken,
+		map[string]any{"score": 3})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestClearRatingIsIdempotent(t *testing.T) {
+	srv := newTestServer(t)
+	pair := registerAndLogin(t, srv)
+	bookID := seedBookRow(t, srv, "vol-dune", "Dune", nil)
+	if rec := doAuthedJSON(t, srv, http.MethodPost, "/library", pair.AccessToken,
+		map[string]any{"book_id": bookID, "status": "read"}); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+
+	// No rating was ever set; clearing must still succeed.
+	rec := doAuthedJSON(t, srv, http.MethodDelete, fmt.Sprintf("/library/%d/rating", bookID), pair.AccessToken, nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestClearRatingMissingEntryIs404(t *testing.T) {
+	srv := newTestServer(t)
+	pair := registerAndLogin(t, srv)
+
+	rec := doAuthedJSON(t, srv, http.MethodDelete, "/library/9999/rating", pair.AccessToken, nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRatingIsScopedToTheCaller(t *testing.T) {
+	srv := newTestServer(t)
+	a := registerAndLogin(t, srv)
+	b := registerAndLoginAs(t, srv, "b@b.com")
+	bookID := seedBookRow(t, srv, "vol-dune", "Dune", nil)
+	if rec := doAuthedJSON(t, srv, http.MethodPost, "/library", a.AccessToken,
+		map[string]any{"book_id": bookID, "status": "read"}); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+
+	path := fmt.Sprintf("/library/%d/rating", bookID)
+	put := doAuthedJSON(t, srv, http.MethodPut, path, b.AccessToken, map[string]any{"score": 5})
+	if put.Code != http.StatusNotFound {
+		t.Fatalf("cross-user PUT = %d, want 404: %s", put.Code, put.Body)
+	}
+	del := doAuthedJSON(t, srv, http.MethodDelete, path, b.AccessToken, nil)
+	if del.Code != http.StatusNotFound {
+		t.Fatalf("cross-user DELETE = %d, want 404: %s", del.Code, del.Body)
 	}
 }

@@ -69,10 +69,13 @@ func ParseSort(s string) (Sort, error) {
 
 // Entry is one book in one user's library. FinishedAt is a pointer because
 // "not finished" is a real state the API reports as an explicit null.
+// Rating is a pointer for the same reason: no rating is a real state, not a
+// zero score.
 type Entry struct {
 	Book       books.Book
 	Status     Status
 	FinishedAt *time.Time
+	Rating     *int
 	AddedAt    time.Time
 }
 

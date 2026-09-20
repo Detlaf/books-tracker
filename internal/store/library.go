@@ -15,12 +15,14 @@ import (
 
 // entryColumns is the shared projection behind Entry and ListEntries. The
 // COALESCEs turn the nullable optional columns into the empty strings
-// books.Book uses, so "unknown" has one representation in Go.
+// books.Book uses, so "unknown" has one representation in Go. r.score stays
+// a nullable int rather than COALESCEd to 0: no rating is a real state, not
+// a zero score.
 const entryColumns = `b.id, b.external_id,
        COALESCE(b.isbn, ''), b.title,
        COALESCE(b.language, ''), COALESCE(b.cover_url, ''),
        COALESCE(b.metadata_source, ''),
-       ub.status, ub.finished_at, ub.created_at`
+       ub.status, ub.finished_at, ub.created_at, r.score`
 
 // orderBy maps an already-validated Sort to a fixed fragment. The client's
 // string is never interpolated: an unknown key cannot reach here, and if one
@@ -63,6 +65,7 @@ func (s *SQLite) Entry(ctx context.Context, userID, bookID int64) (library.Entry
 	q := `SELECT ` + entryColumns + `
 	      FROM user_books ub
 	      JOIN books b ON b.id = ub.book_id
+	      LEFT JOIN ratings r ON r.user_id = ub.user_id AND r.book_id = ub.book_id
 	      WHERE ub.user_id = ? AND ub.book_id = ?`
 
 	row := s.db.QueryRowContext(ctx, q, userID, bookID)
@@ -121,6 +124,31 @@ func (s *SQLite) DeleteEntry(ctx context.Context, userID, bookID int64) error {
 	return nil
 }
 
+// SetRating upserts a rating. Validation (score range, status == read) is
+// Service's job; this only persists.
+func (s *SQLite) SetRating(ctx context.Context, userID, bookID int64, score int) error {
+	const q = `INSERT INTO ratings (user_id, book_id, score, created_at)
+	           VALUES (?, ?, ?, ?)
+	           ON CONFLICT(user_id, book_id) DO UPDATE SET score = excluded.score`
+
+	_, err := s.db.ExecContext(ctx, q, userID, bookID, score, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("set rating: %w", err)
+	}
+	return nil
+}
+
+// ClearRating deletes a rating. Deleting a row that does not exist is not an
+// error: DELETE /library/:book_id/rating is documented as idempotent.
+func (s *SQLite) ClearRating(ctx context.Context, userID, bookID int64) error {
+	const q = `DELETE FROM ratings WHERE user_id = ? AND book_id = ?`
+
+	if _, err := s.db.ExecContext(ctx, q, userID, bookID); err != nil {
+		return fmt.Errorf("clear rating: %w", err)
+	}
+	return nil
+}
+
 // ListEntries loads a page in two queries rather than N+1: one join for the
 // entries, then one batched lookup for their authors. Both are bounded by
 // Limit.
@@ -141,6 +169,7 @@ func (s *SQLite) ListEntries(ctx context.Context, p library.ListParams) ([]libra
 	q := `SELECT ` + entryColumns + `
 	      FROM user_books ub
 	      JOIN books b ON b.id = ub.book_id
+	      LEFT JOIN ratings r ON r.user_id = ub.user_id AND r.book_id = ub.book_id
 	      WHERE ` + where + `
 	      ORDER BY ` + order + `
 	      LIMIT ? OFFSET ?`
@@ -186,11 +215,12 @@ func scanEntry(sc rowScanner) (library.Entry, error) {
 		e          library.Entry
 		status     string
 		finishedAt sql.NullTime
+		rating     sql.NullInt64
 	)
 	err := sc.Scan(
 		&e.Book.ID, &e.Book.ExternalID, &e.Book.ISBN, &e.Book.Title,
 		&e.Book.Language, &e.Book.CoverURL, &e.Book.Source,
-		&status, &finishedAt, &e.AddedAt,
+		&status, &finishedAt, &e.AddedAt, &rating,
 	)
 	if err != nil {
 		return library.Entry{}, err
@@ -199,6 +229,10 @@ func scanEntry(sc rowScanner) (library.Entry, error) {
 	if finishedAt.Valid {
 		t := finishedAt.Time.UTC()
 		e.FinishedAt = &t
+	}
+	if rating.Valid {
+		r := int(rating.Int64)
+		e.Rating = &r
 	}
 	e.AddedAt = e.AddedAt.UTC()
 	return e, nil

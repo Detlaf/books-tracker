@@ -1,68 +1,72 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-import { load, save } from '@/lib/localStore'
+import { ref } from 'vue'
+import * as collectionsApi from '@/api/collections'
 
-// TODO(backend M6): collections have no API yet.
-// specs/backend/implementation.md specifies GET/POST /collections,
-// PATCH/DELETE /collections/:id and POST/DELETE /collections/:id/books, and
-// the `collections` / `collection_books` tables already exist from migration
-// 000001. Until then collections live in this browser only.
+// Collections are backed by the API (backend Milestone 6). IDs are compared
+// as strings throughout: route params (CollectionDetailView's props.id) are
+// always strings, but the API returns numeric ids.
 //
-// Ids are generated locally as `local-<timestamp>`; when the endpoints land
-// they will be server-assigned integers, so any migration path has to treat a
-// `local-` prefix as "not yet uploaded".
+// The wire shape uses book_ids; this store keeps the field as bookIds so no
+// view needs to change — normalize() is the only place the two names meet.
+function normalize(c) {
+  return { id: c.id, name: c.name, bookIds: c.book_ids }
+}
 
 export const useCollectionsStore = defineStore('collections', () => {
   const items = ref([])
 
-  function hydrate() {
-    items.value = load('collections', [])
+  async function hydrate() {
+    const { items: fetched } = await collectionsApi.list()
+    items.value = fetched.map(normalize)
   }
 
-  watch(items, (v) => save('collections', v), { deep: true })
-
-  function create(name) {
+  async function create(name) {
     const trimmed = name.trim()
     if (!trimmed) return null
-    const collection = { id: `local-${Date.now()}`, name: trimmed, bookIds: [] }
+    const created = await collectionsApi.create(trimmed)
+    const collection = normalize(created)
     items.value = [...items.value, collection]
     return collection
   }
 
-  function rename(id, name) {
+  async function rename(id, name) {
     const trimmed = name.trim()
     if (!trimmed) return
-    items.value = items.value.map((c) => (c.id === id ? { ...c, name: trimmed } : c))
+    const updated = await collectionsApi.rename(id, trimmed)
+    items.value = items.value.map((c) => (String(c.id) === String(id) ? normalize(updated) : c))
   }
 
-  function remove(id) {
-    items.value = items.value.filter((c) => c.id !== id)
+  async function remove(id) {
+    await collectionsApi.remove(id)
+    items.value = items.value.filter((c) => String(c.id) !== String(id))
   }
 
   function find(id) {
-    return items.value.find((c) => c.id === id) ?? null
+    return items.value.find((c) => String(c.id) === String(id)) ?? null
   }
 
-  function addBook(collectionId, bookId) {
+  async function addBook(collectionId, bookId) {
     if (bookId == null) return
+    const updated = await collectionsApi.addBook(collectionId, bookId)
     items.value = items.value.map((c) =>
-      c.id !== collectionId || c.bookIds.includes(bookId)
+      String(c.id) === String(collectionId) ? normalize(updated) : c,
+    )
+  }
+
+  async function removeBook(collectionId, bookId) {
+    await collectionsApi.removeBook(collectionId, bookId)
+    items.value = items.value.map((c) =>
+      String(c.id) !== String(collectionId)
         ? c
-        : { ...c, bookIds: [...c.bookIds, bookId] },
+        : { ...c, bookIds: c.bookIds.filter((id) => id !== bookId) },
     )
   }
 
-  function removeBook(collectionId, bookId) {
-    items.value = items.value.map((c) =>
-      c.id !== collectionId ? c : { ...c, bookIds: c.bookIds.filter((id) => id !== bookId) },
-    )
-  }
-
-  function toggleBook(collectionId, bookId) {
+  async function toggleBook(collectionId, bookId) {
     const c = find(collectionId)
     if (!c) return
-    if (c.bookIds.includes(bookId)) removeBook(collectionId, bookId)
-    else addBook(collectionId, bookId)
+    if (c.bookIds.includes(bookId)) await removeBook(collectionId, bookId)
+    else await addBook(collectionId, bookId)
   }
 
   function contains(collectionId, bookId) {
@@ -70,7 +74,10 @@ export const useCollectionsStore = defineStore('collections', () => {
   }
 
   // Called when a book leaves the library, so a collection cannot keep
-  // pointing at an entry that is gone.
+  // pointing at an entry that is gone. This is a local-only cache update —
+  // the backend has no "remove this book from every collection" call, and
+  // none is needed: the book row staying out of user_books does not orphan
+  // collection_books rows in a way that matters to this client.
   function forgetBook(bookId) {
     items.value = items.value.map((c) => ({ ...c, bookIds: c.bookIds.filter((id) => id !== bookId) }))
   }
