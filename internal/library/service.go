@@ -59,7 +59,10 @@ func (s *Service) Update(ctx context.Context, userID, bookID int64, status *Stat
 }
 
 func (s *Service) Remove(ctx context.Context, userID, bookID int64) error {
-	return s.store.DeleteEntry(ctx, userID, bookID)
+	if err := s.store.DeleteEntry(ctx, userID, bookID); err != nil {
+		return err
+	}
+	return s.store.ClearRating(ctx, userID, bookID)
 }
 
 // List normalizes paging and sort before handing them to the store, so the

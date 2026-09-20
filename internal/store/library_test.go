@@ -724,6 +724,37 @@ func TestRatingSurvivesStatusChangeAwayAndBackToRead(t *testing.T) {
 	}
 }
 
+func TestDeleteEntryDoesNotOrphanTheRating(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	bookID := seedBook(t, s, "vol-dune", "Dune", nil)
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusRead, nil); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	if err := s.SetRating(ctx, userID, bookID, 4); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if err := s.DeleteEntry(ctx, userID, bookID); err != nil {
+		t.Fatalf("DeleteEntry: %v", err)
+	}
+	if err := s.ClearRating(ctx, userID, bookID); err != nil {
+		t.Fatalf("ClearRating after delete: %v", err)
+	}
+
+	if _, err := s.AddEntry(ctx, userID, bookID, library.StatusBacklog, nil); err != nil {
+		t.Fatalf("re-AddEntry: %v", err)
+	}
+	got, err := s.Entry(ctx, userID, bookID)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating != nil {
+		t.Fatalf("Rating = %v, want nil after delete + re-add", got.Rating)
+	}
+}
+
 func TestListEntriesIncludesRatings(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

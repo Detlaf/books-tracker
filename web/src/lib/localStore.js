@@ -1,9 +1,8 @@
-// Namespaced localStorage helper for the features that have no backend yet.
+// Namespaced localStorage helper for the settings that have no backend.
 //
-// Keys are scoped by user id so that signing into a second account on the same
-// browser does not show the first account's ratings and collections. That is
-// the minimum needed for the stub to not be actively wrong; it is still local
-// to one browser and is not a substitute for Milestones 5 and 6.
+// Keys are scoped by user id so that signing into a second account on the
+// same browser does not show the first account's display name or reading
+// goal. It is still local to one browser and does not sync across devices.
 
 const PREFIX = 'bookish'
 

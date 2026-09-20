@@ -100,7 +100,6 @@ async function removeFromLibrary() {
   try {
     await library.remove(bookId)
     collections.forgetBook(bookId)
-    ratings.clear(bookId)
     ui.closeBook()
   } catch (e) {
     error.value = e.message || 'Could not remove that book.'

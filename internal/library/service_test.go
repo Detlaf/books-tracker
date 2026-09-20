@@ -100,13 +100,17 @@ func (f *fakeStore) SetRating(_ context.Context, _, bookID int64, score int) err
 	return nil
 }
 
+// ClearRating mirrors the real store: ratings have no FK to user_books, so
+// clearing one never depends on whether a library entry exists. Deleting a
+// rating that was never set (or whose entry is already gone, as when Remove
+// calls this right after DeleteEntry) is a no-op, not an error.
 func (f *fakeStore) ClearRating(_ context.Context, _, bookID int64) error {
 	if f.err != nil {
 		return f.err
 	}
 	e, ok := f.entries[bookID]
 	if !ok {
-		return ErrNotInLibrary
+		return nil
 	}
 	e.Rating = nil
 	f.entries[bookID] = e
@@ -386,6 +390,30 @@ func TestRemoveMissingEntryIsNotInLibrary(t *testing.T) {
 
 	if err := svc.Remove(context.Background(), 1, 42); !errors.Is(err, ErrNotInLibrary) {
 		t.Fatalf("err = %v, want ErrNotInLibrary", err)
+	}
+}
+
+func TestRemoveClearsAnyExistingRating(t *testing.T) {
+	f := newFakeStore()
+	seed(f, 42, StatusRead, ptrTime(fixedNow))
+	svc := newTestService(f)
+	if _, err := svc.SetRating(context.Background(), 1, 42, 4); err != nil {
+		t.Fatalf("SetRating: %v", err)
+	}
+
+	if err := svc.Remove(context.Background(), 1, 42); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// Re-seed the same book id to simulate a re-add, and confirm no stale
+	// rating survived the removal.
+	seed(f, 42, StatusBacklog, nil)
+	got, err := f.Entry(context.Background(), 1, 42)
+	if err != nil {
+		t.Fatalf("Entry: %v", err)
+	}
+	if got.Rating != nil {
+		t.Fatalf("Rating = %v, want nil after remove + re-add", got.Rating)
 	}
 }
 
