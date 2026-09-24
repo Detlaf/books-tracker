@@ -33,7 +33,6 @@ watch(
     collections.hydrate()
     settings.hydrate(auth.email.split('@')[0])
     library.fetchAll()
-    stats.load()
   },
   { immediate: true },
 )

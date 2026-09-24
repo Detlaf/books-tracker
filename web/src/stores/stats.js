@@ -65,7 +65,11 @@ export const useStatsStore = defineStore('stats', () => {
 
   async function setScope(next) {
     scope.value = next
-    await fetchScoped()
+    try {
+      await fetchScoped()
+    } catch (e) {
+      error.value = e.message || 'Could not load your reading stats.'
+    }
   }
 
   async function setMonthYear(year) {

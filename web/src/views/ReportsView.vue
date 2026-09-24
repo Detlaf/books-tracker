@@ -1,11 +1,20 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useStatsStore } from '@/stores/stats'
 import { useSettingsStore } from '@/stores/settings'
 import { barHeight, barColor, pct, initial, yoyLabel } from '@/lib/reports'
 
 const stats = useStatsStore()
 const settings = useSettingsStore()
+
+// Reports has no reactive link to the library anymore (stats are fetched,
+// not derived), so refresh on every mount — not just at login — to pick up
+// changes made elsewhere (marking a book read, editing a finish date, etc.)
+// since the store was last loaded. stats.loaded/stats.loading already keep
+// previously-loaded data on screen while this refresh is in flight.
+onMounted(() => {
+  stats.load()
+})
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -160,6 +169,7 @@ function selectScope(value) {
       </div>
     </div>
   </template>
+  <p v-else-if="stats.error" class="text-muted">{{ stats.error }}</p>
 </template>
 
 <style scoped>

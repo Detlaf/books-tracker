@@ -189,6 +189,30 @@ func TestByLanguageMapsMissingLanguageToUnknown(t *testing.T) {
 	}
 }
 
+// TestByLanguageMergesNullAndEmptyLanguageIntoOneUnknownGroup guards against
+// a GROUP BY bug where SQLite resolves a bare "GROUP BY language" to the
+// source column b.language rather than the SELECT alias, splitting NULL and
+// "" into two separate groups even though both display as "Unknown".
+func TestByLanguageMergesNullAndEmptyLanguageIntoOneUnknownGroup(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	userID := seedUser(t, s, "a@b.com")
+	nullLang := seedBook(t, s, "vol-null", "Null Language", nil)
+	emptyLang := seedBook(t, s, "vol-empty", "Empty Language", nil)
+	setBookLanguage(t, s, emptyLang, "")
+
+	seedRead(t, s, userID, nullLang, datedAt("2026-01-01T00:00:00Z"))
+	seedRead(t, s, userID, emptyLang, datedAt("2026-02-01T00:00:00Z"))
+
+	languages, err := s.ByLanguage(ctx, userID, "all")
+	if err != nil {
+		t.Fatalf("ByLanguage: %v", err)
+	}
+	if len(languages) != 1 || languages[0].Language != "Unknown" || languages[0].Count != 2 {
+		t.Fatalf("languages = %+v, want exactly one Unknown:2 entry", languages)
+	}
+}
+
 func TestByLanguageScopedToYearExcludesUndated(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

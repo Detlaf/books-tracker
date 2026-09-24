@@ -109,7 +109,7 @@ func (s *SQLite) ByLanguage(ctx context.Context, userID int64, scope string) ([]
 		FROM user_books ub
 		JOIN books b ON b.id = ub.book_id
 		WHERE ` + where + `
-		GROUP BY language
+		GROUP BY 1
 		ORDER BY COUNT(*) DESC, language ASC`
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -141,7 +141,7 @@ func (s *SQLite) TopAuthors(ctx context.Context, userID int64, scope string, lim
 	}
 	args = append(args, limit)
 
-	q := `SELECT ba.name, COUNT(*)
+	q := `SELECT ba.name, COUNT(DISTINCT ub.book_id)
 		FROM user_books ub
 		JOIN book_authors ba ON ba.book_id = ub.book_id
 		WHERE ` + where + `
