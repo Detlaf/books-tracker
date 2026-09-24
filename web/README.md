@@ -61,19 +61,14 @@ One area of the design has no endpoint behind it: display name and annual
 reading goal are not specified in any milestone, so `stores/settings.js`
 still persists them to `localStorage`, namespaced per user id.
 
-Ratings (backend Milestone 5, `PUT/DELETE /library/:book_id/rating`) and
-collections (backend Milestone 6, `/collections`, `/collections/:id/books`)
-are now backed by the API — `stores/ratings.js` and `stores/collections.js`
-call it directly and hold no `localStorage` state of their own.
+Ratings (backend Milestone 5, `PUT/DELETE /library/:book_id/rating`),
+collections (backend Milestone 6, `/collections`, `/collections/:id/books`),
+and reports (backend Milestone 7, `/stats/*`) are now backed by the API —
+`stores/ratings.js`, `stores/collections.js` and `stores/stats.js` call it
+directly and hold no `localStorage` state of their own.
 
-Two smaller gaps:
+One smaller gap remains:
 
-- **Reports** is computed on the client from `GET /library` (`src/lib/reports.js`),
-  because Milestone 7's `/stats/*` endpoints do not exist. Every figure the
-  design shows is derivable from the library list, so the screen is complete —
-  it just does the arithmetic locally. It follows M7's stated rule that read
-  books without a `finished_at` count toward totals but cannot be placed in a
-  year, and reports that excluded count so the charts reconcile.
 - **Manual book entry** (the prototype's "no catalog match for that ISBN" form)
   is not implemented. Books only enter the database through the metadata
   provider — `/books/search` and `/books/isbn/:isbn` upsert them and
