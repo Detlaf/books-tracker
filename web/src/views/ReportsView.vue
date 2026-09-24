@@ -125,6 +125,8 @@ function selectScope(value) {
       </div>
     </div>
 
+    <p v-if="stats.error" class="text-muted">{{ stats.error }}</p>
+
     <div class="scope-row">
       <button type="button" class="pill-sm" :class="{ 'is-active': stats.scope === 'all' }" @click="selectScope('all')">
         All time

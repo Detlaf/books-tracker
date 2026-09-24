@@ -64,16 +64,24 @@ export const useStatsStore = defineStore('stats', () => {
   }
 
   async function setScope(next) {
+    const previous = scope.value
+    error.value = ''
     scope.value = next
     try {
       await fetchScoped()
     } catch (e) {
+      scope.value = previous
       error.value = e.message || 'Could not load your reading stats.'
     }
   }
 
   async function setMonthYear(year) {
-    byMonth.value = await statsApi.byMonth(year)
+    error.value = ''
+    try {
+      byMonth.value = await statsApi.byMonth(year)
+    } catch (e) {
+      error.value = e.message || 'Could not load your reading stats.'
+    }
   }
 
   function reset() {

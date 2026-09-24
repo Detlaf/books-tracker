@@ -87,6 +87,21 @@ describe('setScope', () => {
     expect(statsApi.byYear).not.toHaveBeenCalled()
     expect(statsApi.byMonth).not.toHaveBeenCalled()
   })
+
+  it('rolls back to the previous scope and sets an error on failure', async () => {
+    stubAll()
+    const store = useStatsStore()
+    await store.load()
+    expect(store.scope).toBe('all')
+    vi.clearAllMocks()
+    statsApi.byLanguage.mockRejectedValue(new Error('scope boom'))
+    statsApi.topAuthors.mockResolvedValue({ authors: [] })
+
+    await store.setScope('2025')
+
+    expect(store.scope).toBe('all')
+    expect(store.error).toBe('scope boom')
+  })
 })
 
 describe('setMonthYear', () => {
@@ -102,6 +117,18 @@ describe('setMonthYear', () => {
     expect(store.byMonth).toEqual({ year: '2024', months: [] })
     expect(statsApi.byMonth).toHaveBeenCalledWith('2024')
     expect(statsApi.summary).not.toHaveBeenCalled()
+  })
+
+  it('sets an error message on failure without throwing', async () => {
+    stubAll()
+    const store = useStatsStore()
+    await store.load()
+    vi.clearAllMocks()
+    statsApi.byMonth.mockRejectedValue(new Error('month boom'))
+
+    await expect(store.setMonthYear('2024')).resolves.toBeUndefined()
+
+    expect(store.error).toBe('month boom')
   })
 })
 
