@@ -144,7 +144,32 @@ func TestStatsStreakShape(t *testing.T) {
 func TestStatsScopingIsPerCaller(t *testing.T) {
 	srv := newTestServer(t)
 	a := registerAndLoginAs(t, srv, "a@b.com")
-	registerAndLoginAs(t, srv, "b@b.com")
+	b := registerAndLoginAs(t, srv, "b@b.com")
+
+	// Give user B a real, distinguishable read book. If A's /stats/summary
+	// ever ignored the caller's identity (e.g. queried a fixed/wrong user,
+	// or B's data), it would show up here as a non-zero TotalRead for A.
+	bookID := seedBookRow(t, srv, "vol-dune", "Dune", []string{"Frank Herbert"})
+	if rec := doAuthedJSON(t, srv, http.MethodPost, "/library", b.AccessToken,
+		map[string]any{"book_id": bookID, "status": "read"}); rec.Code != http.StatusCreated {
+		t.Fatalf("seed B's library entry: status = %d: %s", rec.Code, rec.Body)
+	}
+
+	// Sanity-check that B's own summary actually reflects the read book,
+	// otherwise this test wouldn't prove anything about A's isolation.
+	recB := get(t, srv, "/stats/summary", "Bearer "+b.AccessToken)
+	if recB.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", recB.Code, recB.Body)
+	}
+	var bodyB struct {
+		TotalRead int `json:"total_read"`
+	}
+	if err := json.Unmarshal(recB.Body.Bytes(), &bodyB); err != nil {
+		t.Fatal(err)
+	}
+	if bodyB.TotalRead != 1 {
+		t.Fatalf("B's TotalRead = %d, want 1 (seed didn't take)", bodyB.TotalRead)
+	}
 
 	rec := get(t, srv, "/stats/summary", "Bearer "+a.AccessToken)
 	if rec.Code != http.StatusOK {
@@ -157,6 +182,6 @@ func TestStatsScopingIsPerCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	if body.TotalRead != 0 {
-		t.Fatalf("TotalRead = %d, want 0 (neither user has read anything)", body.TotalRead)
+		t.Fatalf("TotalRead = %d, want 0 (A has not read anything, and B's read book must not leak into A's stats)", body.TotalRead)
 	}
 }
