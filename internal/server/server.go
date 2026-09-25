@@ -11,6 +11,7 @@ import (
 	"github.com/kate/book-tracking/internal/collections"
 	"github.com/kate/book-tracking/internal/config"
 	"github.com/kate/book-tracking/internal/library"
+	"github.com/kate/book-tracking/internal/stats"
 	"github.com/kate/book-tracking/internal/store"
 )
 
@@ -21,6 +22,7 @@ type Server struct {
 	books       *books.Service
 	library     *library.Service
 	collections *collections.Service
+	stats       *stats.Service
 	signer      *auth.Signer
 }
 
@@ -34,6 +36,7 @@ func New(db *sql.DB, cfg config.Config) *Server {
 		books:       books.NewService(books.NewGoogleBooks(cfg.GoogleBooksAPIKey), sqlStore),
 		library:     library.NewService(sqlStore),
 		collections: collections.NewService(sqlStore),
+		stats:       stats.NewService(sqlStore),
 		signer:      signer,
 	}
 	s.routes()
@@ -69,6 +72,12 @@ func (s *Server) routes() {
 	authed.DELETE("/collections/:id", s.handleCollectionsDelete)
 	authed.POST("/collections/:id/books", s.handleCollectionsAddBook)
 	authed.DELETE("/collections/:id/books/:book_id", s.handleCollectionsRemoveBook)
+	authed.GET("/stats/summary", s.handleStatsSummary)
+	authed.GET("/stats/by-year", s.handleStatsByYear)
+	authed.GET("/stats/by-month", s.handleStatsByMonth)
+	authed.GET("/stats/by-language", s.handleStatsByLanguage)
+	authed.GET("/stats/top-authors", s.handleStatsTopAuthors)
+	authed.GET("/stats/streak", s.handleStatsStreak)
 }
 
 // Handler exposes the router for tests and for embedding behind another mux.

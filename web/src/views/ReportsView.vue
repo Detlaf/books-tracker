@@ -1,91 +1,134 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { useLibraryStore } from '@/stores/library'
+import { computed, onMounted } from 'vue'
+import { useStatsStore } from '@/stores/stats'
 import { useSettingsStore } from '@/stores/settings'
-import * as reports from '@/lib/reports'
+import { barHeight, barColor, pct, initial, yoyLabel } from '@/lib/reports'
 
-const library = useLibraryStore()
+const stats = useStatsStore()
 const settings = useSettingsStore()
 
-const scope = ref('all')
+// Reports has no reactive link to the library anymore (stats are fetched,
+// not derived), so refresh on every mount — not just at login — to pick up
+// changes made elsewhere (marking a book read, editing a finish date, etc.)
+// since the store was last loaded. stats.loaded/stats.loading already keep
+// previously-loaded data on screen while this refresh is in flight.
+onMounted(() => {
+  stats.load()
+})
 
-const entries = computed(() => library.entries)
-const summary = computed(() => reports.summary(entries.value))
-const byYear = computed(() => reports.byYear(entries.value))
-const monthly = computed(() => reports.byMonth(entries.value, summary.value.currentYear))
-const streak = computed(() => reports.currentStreak(entries.value))
-const years = computed(() => reports.availableYears(entries.value))
-const byLanguage = computed(() => reports.byLanguage(entries.value, scope.value))
-const topAuthors = computed(() => reports.topAuthors(entries.value, scope.value))
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-const scopeLabel = computed(() => (scope.value === 'all' ? 'all time' : scope.value))
-const goalPct = computed(() =>
-  Math.min(100, Math.round((summary.value.thisYearCount / Math.max(1, settings.readingGoal)) * 100)),
+const years = computed(() => stats.byYear.years.map((y) => y.year))
+
+const yearBars = computed(() => {
+  const max = Math.max(1, ...stats.byYear.years.map((y) => y.count))
+  const currentYear = String(stats.summary?.currentYear ?? '')
+  return stats.byYear.years.map((y) => ({
+    year: y.year,
+    count: y.count,
+    height: barHeight(y.count, max, { min: 10, scale: 110 }),
+    color: barColor(y.year === currentYear),
+  }))
+})
+
+const monthBars = computed(() => {
+  const max = Math.max(1, ...stats.byMonth.months.map((m) => m.count))
+  return stats.byMonth.months.map((m) => ({
+    label: MONTH_LABELS[m.month - 1],
+    count: m.count,
+    height: barHeight(m.count, max, { min: 6, scale: 70, zeroStub: 2 }),
+    color: barColor(m.count > 0, { on: 'var(--color-accent-500)', off: 'var(--color-neutral-200)' }),
+  }))
+})
+
+const yoy = computed(() =>
+  stats.summary ? yoyLabel(stats.summary.thisYearCount, stats.summary.lastYearCount) : '',
 )
+
+const scopeLabel = computed(() => (stats.scope === 'all' ? 'all time' : stats.scope))
+
+const goalPct = computed(() =>
+  stats.summary
+    ? Math.min(100, Math.round((stats.summary.thisYearCount / Math.max(1, settings.readingGoal)) * 100))
+    : 0,
+)
+
+const languageBars = computed(() => {
+  const max = Math.max(1, ...stats.byLanguage.map((l) => l.count))
+  return stats.byLanguage.map((l) => ({ ...l, pct: pct(l.count, max) }))
+})
+
+const authorRows = computed(() => stats.topAuthors.map((a) => ({ ...a, initial: initial(a.author) })))
+
+function selectScope(value) {
+  stats.setScope(value)
+}
 </script>
 
 <template>
   <h1 class="page-title">Reports</h1>
   <p class="text-muted page-subtitle">Your reading, by the numbers.</p>
 
-  <p v-if="library.loading && !library.loaded" class="text-muted">Loading…</p>
+  <p v-if="stats.loading && !stats.loaded" class="text-muted">Loading…</p>
 
-  <template v-else>
+  <template v-else-if="stats.summary">
     <div class="stat-grid">
       <div class="card">
         <div class="card-kicker">Total read</div>
-        <div class="stat-value">{{ summary.totalRead }}</div>
+        <div class="stat-value">{{ stats.summary.totalRead }}</div>
         <div class="card-meta">all time</div>
       </div>
       <div class="card">
         <div class="card-kicker">This year</div>
-        <div class="stat-value">{{ summary.thisYearCount }}</div>
-        <div class="card-meta">{{ summary.yoyLabel }}</div>
+        <div class="stat-value">{{ stats.summary.thisYearCount }}</div>
+        <div class="card-meta">{{ yoy }}</div>
       </div>
       <div class="card">
         <div class="card-kicker">Current streak</div>
-        <div class="stat-value">{{ streak }}</div>
+        <div class="stat-value">{{ stats.streak }}</div>
         <div class="card-meta">months in a row with a finish</div>
       </div>
       <div class="card">
-        <div class="card-kicker">{{ summary.currentYear }} goal</div>
-        <div class="stat-value">{{ summary.thisYearCount }} / {{ settings.readingGoal }}</div>
+        <div class="card-kicker">{{ stats.summary.currentYear }} goal</div>
+        <div class="stat-value">{{ stats.summary.thisYearCount }} / {{ settings.readingGoal }}</div>
         <div class="meter goal-meter"><span :style="{ width: goalPct + '%' }" /></div>
       </div>
     </div>
 
     <h3 class="section-heading">Books finished by year</h3>
-    <div v-if="byYear.length" class="year-chart">
-      <div v-for="y in byYear" :key="y.year" class="year-col">
+    <div v-if="yearBars.length" class="year-chart">
+      <div v-for="y in yearBars" :key="y.year" class="year-col">
         <div class="year-count">{{ y.count }}</div>
-        <div class="year-bar" :style="{ background: y.barColor, height: y.barHeight + 'px' }" />
+        <div class="year-bar" :style="{ background: y.color, height: y.height + 'px' }" />
         <div class="text-muted year-label">{{ y.year }}</div>
       </div>
     </div>
     <p v-else class="text-muted chart-empty">Nothing finished yet — mark a book as read to start the chart.</p>
 
     <!--
-      Backend Milestone 7 specifies that read books with no finish date are
-      counted in the summary but cannot be placed in a year. Saying so keeps
-      the by-year total reconcilable against "Total read" instead of looking
+      /stats/by-year's rule: a read book with no finish date counts toward
+      the summary but cannot be placed in a year. Saying so keeps the
+      by-year total reconcilable against "Total read" instead of looking
       like a bug.
     -->
-    <p v-if="summary.undatedRead" class="text-muted excluded-note">
-      {{ summary.undatedRead }} read
-      {{ summary.undatedRead === 1 ? 'book has' : 'books have' }} no finish date and
-      {{ summary.undatedRead === 1 ? 'is' : 'are' }} not shown in the year and month charts.
+    <p v-if="stats.byYear.undated" class="text-muted excluded-note">
+      {{ stats.byYear.undated }} read
+      {{ stats.byYear.undated === 1 ? 'book has' : 'books have' }} no finish date and
+      {{ stats.byYear.undated === 1 ? 'is' : 'are' }} not shown in the year and month charts.
     </p>
 
-    <h3 class="section-heading">{{ summary.currentYear }} by month</h3>
+    <h3 class="section-heading">{{ stats.byMonth.year }} by month</h3>
     <div class="month-chart">
-      <div v-for="m in monthly" :key="m.label" class="month-col">
-        <div class="month-bar" :style="{ background: m.barColor, height: m.barHeight + 'px' }" />
+      <div v-for="m in monthBars" :key="m.label" class="month-col">
+        <div class="month-bar" :style="{ background: m.color, height: m.height + 'px' }" />
         <div class="text-muted month-label">{{ m.label }}</div>
       </div>
     </div>
 
+    <p v-if="stats.error" class="text-muted">{{ stats.error }}</p>
+
     <div class="scope-row">
-      <button type="button" class="pill-sm" :class="{ 'is-active': scope === 'all' }" @click="scope = 'all'">
+      <button type="button" class="pill-sm" :class="{ 'is-active': stats.scope === 'all' }" @click="selectScope('all')">
         All time
       </button>
       <button
@@ -93,8 +136,8 @@ const goalPct = computed(() =>
         :key="y"
         type="button"
         class="pill-sm"
-        :class="{ 'is-active': scope === y }"
-        @click="scope = y"
+        :class="{ 'is-active': stats.scope === y }"
+        @click="selectScope(y)"
       >
         {{ y }}
       </button>
@@ -104,30 +147,31 @@ const goalPct = computed(() =>
       <div>
         <h3 class="section-heading">By language ({{ scopeLabel }})</h3>
         <div class="bars">
-          <div v-for="l in byLanguage" :key="l.language">
+          <div v-for="l in languageBars" :key="l.language">
             <div class="bar-head">
               <span>{{ l.language }}</span>
               <span class="text-muted">{{ l.count }}</span>
             </div>
             <div class="meter"><span :style="{ width: l.pct + '%' }" /></div>
           </div>
-          <p v-if="!byLanguage.length" class="text-muted">No finished books in this period.</p>
+          <p v-if="!languageBars.length" class="text-muted">No finished books in this period.</p>
         </div>
       </div>
 
       <div>
         <h3 class="section-heading">Most-read authors ({{ scopeLabel }})</h3>
         <div class="bars">
-          <div v-for="a in topAuthors" :key="a.author" class="author-row">
+          <div v-for="a in authorRows" :key="a.author" class="author-row">
             <div class="author-avatar">{{ a.initial }}</div>
             <div class="author-name">{{ a.author }}</div>
             <span class="tag tag-neutral">{{ a.count }}</span>
           </div>
-          <p v-if="!topAuthors.length" class="text-muted">No finished books in this period.</p>
+          <p v-if="!authorRows.length" class="text-muted">No finished books in this period.</p>
         </div>
       </div>
     </div>
   </template>
+  <p v-else-if="stats.error" class="text-muted">{{ stats.error }}</p>
 </template>
 
 <style scoped>
