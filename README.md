@@ -13,7 +13,7 @@ Requirements are in [`product.md`](product.md), the stack is fixed by
 
 | Component | Stack | Status |
 | --- | --- | --- |
-| Backend | Go + SQLite | Auth, book search, reading status. Ratings, collections and statistics endpoints are not built yet — Milestones 5–7. |
+| Backend | Go + SQLite | Auth, book search, reading status, ratings, collections, statistics. |
 | Web frontend | Vue 3 + Vite | All screens implemented. See [`web/README.md`](web/README.md). |
 | Android app | Kotlin | Not started. |
 
@@ -96,6 +96,20 @@ All routes except `/health` and `/auth/*` require an
 | `POST` | `/library` | Add a book at a status |
 | `PATCH` | `/library/:book_id` | Change status or finish date |
 | `DELETE` | `/library/:book_id` | Remove a book |
+| `PUT` | `/library/:book_id/rating` | Set a 1–5 rating on a book |
+| `DELETE` | `/library/:book_id/rating` | Clear a book's rating |
+| `GET` | `/collections` | List your collections |
+| `POST` | `/collections` | Create a collection |
+| `PATCH` | `/collections/:id` | Rename a collection |
+| `DELETE` | `/collections/:id` | Delete a collection |
+| `POST` | `/collections/:id/books` | Add a book to a collection |
+| `DELETE` | `/collections/:id/books/:book_id` | Remove a book from a collection |
+| `GET` | `/stats/summary` | Total read, this/last year, current streak |
+| `GET` | `/stats/by-year` | Books read grouped by year |
+| `GET` | `/stats/by-month?year=` | Books read grouped by month within a year |
+| `GET` | `/stats/by-language?scope=` | Books read grouped by language, `scope` is `all` or a year |
+| `GET` | `/stats/top-authors?scope=&limit=` | Most-read authors, `scope` is `all` or a year |
+| `GET` | `/stats/streak` | Consecutive months with a finished book |
 
 Reading statuses are `backlog`, `reading` and `read`. The web UI labels the
 first one "To Read".
@@ -105,11 +119,9 @@ and `/books/isbn/:isbn` upsert what they find and return a local `id`, and
 `POST /library` requires an id that came from one of those. There is no
 endpoint for creating a book by hand.
 
-Ratings, collections and statistics endpoints are specified in
-[`specs/backend/implementation.md`](specs/backend/implementation.md) but not
-implemented. The web app covers those features locally in the meantime —
-[`web/README.md`](web/README.md) explains what that means and what changes when
-the endpoints land.
+All milestones in [`specs/backend/implementation.md`](specs/backend/implementation.md)
+are now implemented, including statistics. The Reports screen in the web app
+is wired to the `/stats/*` endpoints above — see [`web/README.md`](web/README.md).
 
 ## Layout
 
@@ -118,7 +130,9 @@ cmd/server/        entrypoint
 internal/
   auth/            passwords, JWTs, refresh tokens
   books/           metadata provider (Google Books), ISBN handling
-  library/         reading status rules, incl. finished_at transitions
+  library/         reading status rules, incl. finished_at transitions, and ratings
+  collections/     collection CRUD and book membership
+  stats/           reading statistics: summary, by-year/month, by-language, top authors, streak
   server/          HTTP handlers, routing, middleware
   store/           SQLite persistence
   db/              connection + embedded migrations

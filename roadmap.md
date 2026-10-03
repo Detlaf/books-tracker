@@ -19,15 +19,15 @@ Implemented in `web/` from the design prototype `Book Tracker.dc.html`. See
 
 - [x] Project scaffold (Vite + Vue 3 + Vue Router + Pinia)
 - [x] Book search UI: title, author, ISBN input
-- [x] Book detail page with status selector and rating widget
-      (ratings are browser-local until Milestone 5)
+- [x] Book detail page with status selector and rating widget,
+      backed by `PUT/DELETE /library/:book_id/rating` (Milestone 5)
 - [x] Reading list views: backlog, currently reading, read
-- [x] Collections management UI (browser-local until Milestone 6)
-- [x] Reporting/statistics page — computed client-side from `GET /library`
-      until Milestone 7 lands:
-  - [x] Books read per year
+- [x] Collections management UI, backed by `/collections` (Milestone 6)
+- [x] Reporting/statistics page, backed by `/stats/*` (Milestone 7):
+  - [x] Books read per year and per month
   - [x] Breakdown by language
   - [x] Most-read authors
+  - [x] Current streak
 - [x] Auth pages (login / register)
 
 ## Phase 3 — Android App (Kotlin)
